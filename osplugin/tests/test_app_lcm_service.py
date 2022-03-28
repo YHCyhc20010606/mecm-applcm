@@ -37,7 +37,7 @@ class AppLcmServiceTest(unittest.TestCase):
     """
     app_lcm_service = AppLcmService()
     access_token = gen_token.test_access_token
-    host_ip = '159.138.23.91'
+    host_ip = '10.10.10.10'
 
     @mock.patch("service.app_lcm_service.start_check_package_status")
     @mock.patch("task.image_task.create_glance_client")

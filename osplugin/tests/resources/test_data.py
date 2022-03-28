@@ -25,8 +25,21 @@ mock glance client
 返回模拟数据
 """
 mock_glance_client = Mock()
+mock_glance_client.images.list.return_value = [
+    {
+        'id': 'abc1231234',
+        'name': 'image01',
+        'status': 'active',
+        'size': 2014,
+        'checksum': '222',
+        'diskFormat': 'qcow2',
+        'visibility': True,
+        'protected': False
+    }
+]
 mock_glance_client.images.get.return_value = {
     'id': 'abc1231234',
+'name': 'image01',
     'status': 'active',
     'size': 2014,
     'checksum': '222',

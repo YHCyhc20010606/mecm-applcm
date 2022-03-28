@@ -124,7 +124,7 @@ class VmImageServiceTest(unittest.TestCase):
     """
     vm_image_service = ImageService()
     access_token = gen_token.test_access_token
-    host_ip = '10.10.9.75'
+    host_ip = '10.0.0.1'
     tenant_id = 'tenant001'
 
     @mock.patch("service.image_service.create_glance_client")
@@ -163,12 +163,15 @@ class VmImageServiceTest(unittest.TestCase):
             )
             commit()
         resp = self.vm_image_service.deleteVmImage(request, None)
-        assert resp.status == 'Success'
+        resp_data = json.loads(resp.status)
+        assert resp_data['retCode'] == 200
 
-    def test_query_image(self):
+    @mock.patch('service.image_service.create_glance_client')
+    def test_query_image(self, create_glance_client):
         """
         test_query_image
         """
+        create_glance_client.return_value = mock_glance_client
         with db_session:
             VmImageInfoMapper(
                 image_id='e8360231-14fe-4baf-b34a-5be17c62e2f8',
@@ -234,7 +237,8 @@ class VmImageServiceTest(unittest.TestCase):
                                             tenant_id=self.tenant_id)
 
         resp = self.vm_image_service.uploadVmImage(request, None)
-        assert resp.status == 'Success'
+        resp_data = json.loads(resp.status)
+        assert resp_data['retCode'] == 0
 
     @mock.patch('service.image_service.add_import_image_task')
     @mock.patch('service.image_service.create_glance_client')
@@ -253,4 +257,5 @@ class VmImageServiceTest(unittest.TestCase):
                                             host_ip=self.host_ip,
                                             tenant_id=self.tenant_id)
         resp = self.vm_image_service.importVmImage(request, None)
-        assert resp.status == 'Success'
+        resp_data = json.loads(resp.status)
+        assert resp_data['retCode'] == 200
