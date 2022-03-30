@@ -194,11 +194,11 @@ func (c *VmImageController) ImportImage() {
 }
 
 func (c *VmImageController) ValidateBodyParam (image models.Image, clientIp string) error {
-	name, err := util.ValidateName(image.Name, util.NameRegex)
-	if err != nil || !name {
+	err := util.ValidateLen(image.Name)
+	if err != nil {
 		return err
 	}
-	name, err = util.ValidateName(image.Containerformat, util.NameRegex)
+	name, err := util.ValidateName(image.Containerformat, util.NameRegex)
 	if err != nil || !name {
 		return err
 	}
