@@ -80,7 +80,11 @@ def _set_iso_cdrom(appd, image_id_map):
         image = template['properties']['sw_image_data']['name']
         if image_id_map[image]['format'] != 'iso':
             continue
+
+        # 处理镜像
         template['properties']['sw_image_data']['name'] = 'empty-disk'
+
+        # 处理卷
         volume_node_name = node_name + '_CDROM'
         volume_size = int(image_id_map[image]['size'] / 1000000000) + 1
         properties = {
@@ -96,6 +100,13 @@ def _set_iso_cdrom(appd, image_id_map):
             'type': 'tosca.nodes.nfv.Vdu.VirtualStorage',
             'properties': properties
         }
+
+        # 处理挂载
+        if 'requirements' not in template:
+            template['requirements'] = []
+        template['requirements'].append({
+            'virtual_storage': volume_node_name
+        })
     topology_template['node_templates'].update(volume_templates)
 
 
