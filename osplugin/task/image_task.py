@@ -404,11 +404,11 @@ def do_push_image(image_id, host_ip):
     if image_info.compress_task_status != utils.PUSHING:
         LOG.debug('compress not finished, skip push')
         return
+
+    image_file = open(f'{base_dir}/vmImage/{host_ip}/{image_id}.qcow2', 'rb')
     try:
         data = MultipartEncoder({
-            'file': (f'{image_id}.qcow2',
-                     open(f'{base_dir}/vmImage/{host_ip}/{image_id}.qcow2', 'rb'),
-                     'application/octet-stream'),
+            'file': (f'{image_id}.qcow2', image_file, 'application/octet-stream'),
             'priority': '0',
             'userId': image_info.tenant_id
         })
@@ -420,16 +420,15 @@ def do_push_image(image_id, host_ip):
         if response.status_code != 200:
             logger.error('developer response an error: %s', response.json())
             image_info.compress_task_status = utils.FAILURE
-            commit()
             return
         logger.debug('end push image: %s to developer', image_id)
         response_data = response.json()
         image_info.remote_url = config.image_push_url + '/' + response_data['imageId']
         image_info.compress_task_status = utils.SUCCESS
-        commit()
     except Exception as exception:
         logger.error(exception, exc_info=True)
         image_info.compress_task_status = utils.FAILURE
-        commit()
     finally:
+        commit()
+        image_file.close()
         utils.delete_dir(f'{base_dir}/vmImage/{host_ip}/{image_id}.qcow2')
