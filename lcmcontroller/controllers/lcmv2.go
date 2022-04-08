@@ -1039,30 +1039,35 @@ func (c *LcmControllerV2) TerminateV2() {
 
 	tenantId, err := c.IsPermitted(accessToken, clientIp)
 	if err != nil {
+		log.Error("Failed to get tenantId.")
 		util.ClearByteArray(bKey)
 		return
 	}
 
 	appInsId, err := c.GetAppInstId(clientIp)
 	if err != nil {
+		log.Error("Failed to get app instanceId.")
 		util.ClearByteArray(bKey)
 		return
 	}
 
 	appInfoRecord, err := c.GetAppInfoRecord(appInsId, clientIp)
 	if err != nil {
+		log.Error("Failed to get app info record.")
 		util.ClearByteArray(bKey)
 		return
 	}
 
 	vim, configTenantId, err := c.TenantIdAndVim(appInfoRecord.MecHost, clientIp)
 	if err != nil {
+		log.Error("Failed to get tenantId and vim.")
 		util.ClearByteArray(bKey)
 		return
 	}
 
 	adapter, err := c.GetPluginAdapter(appInfoRecord.DeployType, clientIp, vim)
 	if err != nil {
+		log.Error("Failed to get plugin adapter.")
 		util.ClearByteArray(bKey)
 		return
 	}
@@ -1091,6 +1096,7 @@ func (c *LcmControllerV2) TerminateV2() {
 
 	err = c.DeleteTenantRecord(clientIp, tenantId)
 	if err != nil {
+		log.Error("Failed to delete tenant record.")
 		return
 	}
 
@@ -1558,6 +1564,7 @@ func (c *LcmControllerV2) DeletePackage() {
 	clientIp, bKey, accessToken, err := c.GetClientIpAndValidateAccessToken("Delete application package request received.", []string{util.MecmTenantRole, util.MecmAdminRole}, "")
 	defer util.ClearByteArray(bKey)
 	if err != nil {
+		log.Error("Failed to get clientIp.")
 		return
 	}
 
@@ -1575,6 +1582,7 @@ func (c *LcmControllerV2) DeletePackage() {
 
 	err = c.ProcessDeletePackage(clientIp, packageId, tenantId, accessToken)
 	if err != nil {
+		log.Error("Failed to delete package.")
 		return
 	}
 
@@ -1619,6 +1627,7 @@ func (c *LcmControllerV2) GetClientIpAndValidateAccessToken(receiveMsg string, a
 		if name != "" && key != "" {
 			err = c.validateCredentials(clientIp, name, key)
 			if err != nil {
+				log.Error("Failed to validate credentials.")
 				return
 			}
 		}
@@ -1754,16 +1763,19 @@ func (c *LcmControllerV2) DeletePackageOnHost() {
 	clientIp, bKey, accessToken, err := c.GetClientIpAndValidateAccessToken("Delete application package on host request received.", []string{util.MecmTenantRole, util.MecmAdminRole}, "")
 	defer util.ClearByteArray(bKey)
 	if err != nil {
+		log.Error("Failed to get clientIp on host.")
 		return
 	}
 
 	tenantId, packageId, hostIp, err := c.GetInputParametersForDelPkgOnHost(clientIp)
 	if err != nil {
+		log.Error("Failed to get params on host.")
 		return
 	}
 
 	pkgRecHostIp, configTenantId, vim, err := c.GetVimAndHostIpFromPkgHostRec(clientIp, packageId, tenantId, hostIp)
 	if err != nil {
+		log.Error("Failed to get hostIp on host.")
 		return
 	}
 
@@ -1782,6 +1794,7 @@ func (c *LcmControllerV2) DeletePackageOnHost() {
 	}
 	err = c.DelAppPkgRecords(clientIp, packageId, configTenantId, hostIp)
 	if err != nil {
+		log.Error("Failed to get delete package records on host.")
 		return
 	}
 

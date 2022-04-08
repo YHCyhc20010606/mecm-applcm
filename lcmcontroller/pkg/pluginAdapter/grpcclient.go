@@ -151,6 +151,7 @@ func (c *ClientGRPC) Terminate(ctx context.Context, hostIP string, tenantId stri
 	}
 	resp, err := c.client.Terminate(ctx, req)
 	if err != nil {
+		log.Error("failed to terminate application")
 		return "", err
 	}
 	return resp.Status, err
