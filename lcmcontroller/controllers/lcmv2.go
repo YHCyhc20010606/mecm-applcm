@@ -2200,7 +2200,7 @@ func (c *LcmControllerV2) SynchronizeAppPackageUpdatedRecord() {
 			}
 		}
 	}
-
+	log.Info("Sync AppPackage UpdatedRecord length is: " + len(appPackages))
 	err = c.SendAppPkgSyncRecords(appPackagesSync, clientIp)
 	if err != nil {
 		return
@@ -2219,6 +2219,7 @@ func (c *LcmControllerV2) InsertAppPackageRec(appPackagesSync []*models.AppPacka
 	for _, appPackage := range appPackagesSync {
 		for _, appPkgMecHostInfo := range appPackage.MecHostInfo {
 			appPkgMecHostInfo.SyncStatus = true
+			log.Info("Sync appPkgMecHostInfo is: " + appPkgMecHostInfo.AppPkgId + appPkgMecHostInfo.HostIp)
 			err := c.Db.InsertOrUpdateData(appPkgMecHostInfo, util.PkgHostKey)
 			if err != nil && err.Error() != util.LastInsertIdNotSupported {
 				log.Error("Failed to save app package mec host record to database.")
@@ -2227,6 +2228,7 @@ func (c *LcmControllerV2) InsertAppPackageRec(appPackagesSync []*models.AppPacka
 		}
 
 		appPackage.SyncStatus = true
+		log.Info("Sync packages info is: " + appPackage.AppPkgId + appPackage.AppPkgName)
 		err := c.Db.InsertOrUpdateData(appPackage, util.AppPkgId)
 		if err != nil && err.Error() != util.LastInsertIdNotSupported {
 			log.Error("Failed to save app package host record to database.")
@@ -2253,7 +2255,7 @@ func (c *LcmControllerV2) SendAppPkgSyncRecords(appPackagesSync []*models.AppPac
 	}
 
 	appPackageSyncRecords.AppPackagesUpdatedRecs = append(appPackageSyncRecords.AppPackagesUpdatedRecs, appPackageRec...)
-
+	log.Info("Sync packages len is: " + len(appPackageSyncRecords.AppPackagesUpdatedRecs))
 	response, err := json.Marshal(appPackageSyncRecords)
 	if err != nil {
 		c.HandleForErrorCode(clientIp, util.BadRequest, util.FailedToMarshal, util.ErrCodeFailedToMarshal)
@@ -2262,6 +2264,7 @@ func (c *LcmControllerV2) SendAppPkgSyncRecords(appPackagesSync []*models.AppPac
 
 	c.Ctx.ResponseWriter.Header().Set(util.ContentType, util.ApplicationJson)
 	c.Ctx.ResponseWriter.Header().Set(util.Accept, util.ApplicationJson)
+	log.Info("Sync packages result is: " + response)
 	_, err = c.Ctx.ResponseWriter.Write(response)
 	if err != nil {
 		c.HandleForErrorCode(clientIp, util.StatusInternalServerError, util.FailedToWriteRes, util.ErrCodeWriteResFailed)
@@ -2319,6 +2322,7 @@ func (c *LcmControllerV2) SynchronizeAppPackageStaleRecord() {
 
 	c.Ctx.ResponseWriter.Header().Set(util.ContentType, util.ApplicationJson)
 	c.Ctx.ResponseWriter.Header().Set(util.Accept, util.ApplicationJson)
+	log.Info("Synchronize AppPackageStaleRecord result is: " + res)
 	_, err = c.Ctx.ResponseWriter.Write(res)
 	if err != nil {
 		c.HandleForErrorCode(clientIp, util.StatusInternalServerError, util.FailedToWriteRes, util.ErrCodeWriteResFailed)
