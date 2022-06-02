@@ -2200,7 +2200,7 @@ func (c *LcmControllerV2) SynchronizeAppPackageUpdatedRecord() {
 			}
 		}
 	}
-	log.Info("Sync AppPackage UpdatedRecord length is: " + len(appPackages))
+	log.Info("Sync AppPackage UpdatedRecord length is: " + strconv.Itoa(len(appPackages)))
 	err = c.SendAppPkgSyncRecords(appPackagesSync, clientIp)
 	if err != nil {
 		return
@@ -2255,7 +2255,7 @@ func (c *LcmControllerV2) SendAppPkgSyncRecords(appPackagesSync []*models.AppPac
 	}
 
 	appPackageSyncRecords.AppPackagesUpdatedRecs = append(appPackageSyncRecords.AppPackagesUpdatedRecs, appPackageRec...)
-	log.Info("Sync packages len is: " + len(appPackageSyncRecords.AppPackagesUpdatedRecs))
+	log.Info("Sync packages len is: " + strconv.Itoa(len(appPackageSyncRecords.AppPackagesUpdatedRecs)))
 	response, err := json.Marshal(appPackageSyncRecords)
 	if err != nil {
 		c.HandleForErrorCode(clientIp, util.BadRequest, util.FailedToMarshal, util.ErrCodeFailedToMarshal)
@@ -2264,7 +2264,6 @@ func (c *LcmControllerV2) SendAppPkgSyncRecords(appPackagesSync []*models.AppPac
 
 	c.Ctx.ResponseWriter.Header().Set(util.ContentType, util.ApplicationJson)
 	c.Ctx.ResponseWriter.Header().Set(util.Accept, util.ApplicationJson)
-	log.Info("Sync packages result is: " + response)
 	_, err = c.Ctx.ResponseWriter.Write(response)
 	if err != nil {
 		c.HandleForErrorCode(clientIp, util.StatusInternalServerError, util.FailedToWriteRes, util.ErrCodeWriteResFailed)
@@ -2322,7 +2321,6 @@ func (c *LcmControllerV2) SynchronizeAppPackageStaleRecord() {
 
 	c.Ctx.ResponseWriter.Header().Set(util.ContentType, util.ApplicationJson)
 	c.Ctx.ResponseWriter.Header().Set(util.Accept, util.ApplicationJson)
-	log.Info("Synchronize AppPackageStaleRecord result is: " + res)
 	_, err = c.Ctx.ResponseWriter.Write(res)
 	if err != nil {
 		c.HandleForErrorCode(clientIp, util.StatusInternalServerError, util.FailedToWriteRes, util.ErrCodeWriteResFailed)
