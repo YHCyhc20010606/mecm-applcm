@@ -33,6 +33,7 @@ import (
 	"path/filepath"
 	"strings"
 	"unsafe"
+	"strconv"
 
 	"github.com/ghodss/yaml"
 
