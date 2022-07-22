@@ -81,6 +81,7 @@ const (
 	RequestBodyLength             = 4096
 
 	MaxIPVal             = 255
+	MaxIdLength          = 255
 
 	SuccessCode int = 200
 
@@ -340,6 +341,14 @@ func ValidateName(name string, regex string) (bool, error) {
 		return false, errors.New("name length is larger than max size")
 	}
 	return regexp.MatchString(regex, name)
+}
+
+// Validate length 
+func ValidateLen(name string) error {
+	if len(name) > MaxIdLength {
+		return errors.New("name length exceeded max length 255")
+	}
+	return nil
 }
 
 // Validate access token
