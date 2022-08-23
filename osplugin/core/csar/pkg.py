@@ -110,6 +110,52 @@ def _set_iso_cdrom(appd, image_id_map):
     topology_template['node_templates'].update(volume_templates)
 
 
+def _set_vmtools_cdrom(appd, image_id_map):
+    """
+    对于iso格式的镜像，挂载vmtools
+    Args:
+        appd:
+
+    Returns:
+
+    """
+    logger.info('_set_vmtools_cdrom starting.')
+    topology_template = appd['topology_template']
+    volume_templates = {}
+    for node_name, template in topology_template['node_templates'].items():
+        if template['type'] != 'tosca.nodes.nfv.Vdu.Compute':
+            continue
+        image = template['properties']['sw_image_data']['name']
+        logger.info('now imageId %s', image.image_id)
+        if image_id_map[image]['format'] != 'iso':
+            continue
+
+        logger.info('starting attach vmtools')
+        properties = {
+            'virtual_storage_data': {
+                'type_of_storage': 'block_storage',
+                'size_of_storage': 1000
+            },
+            'sw_image_data': {'name': 'vmtools'},
+        }
+        volume_node_name = 'VMTOOLS_CDROM'
+        volume_templates[volume_node_name] = {
+            'type': 'tosca.nodes.nfv.Vdu.VirtualStorage',
+            'properties': properties
+        }
+
+        if 'nfvi_constraints' in template['properties']:
+            properties['nfvi_constraints'] = template['properties']['nfvi_constraints']
+        # 处理挂载
+        if 'requirements' not in template:
+            template['requirements'] = []
+        template['requirements'].append({
+            'virtual_storage': volume_node_name
+        })
+
+    topology_template['node_templates'].update(volume_templates)
+    logger.info('attach vmtools ends')
+
 def _set_ak_sk(appd):
     inputs = appd['topology_template']['inputs']
     if 'ak' not in inputs or 'sk' not in inputs:
@@ -246,6 +292,7 @@ class CsarPkg:
         # Default security group rules
         _set_default_security_group(appd)
         _set_iso_cdrom(appd, self.image_id_map)
+        _set_vmtools_cdrom(appd, self.image_id_map)
         _set_ak_sk(appd)
 
         LOG.debug('app descriptions:\n%s', yaml.dump(appd, Dumper=yaml.SafeDumper))
