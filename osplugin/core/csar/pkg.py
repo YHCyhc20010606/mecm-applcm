@@ -291,8 +291,8 @@ class CsarPkg:
 
         # Default security group rules
         _set_default_security_group(appd)
-        _set_iso_cdrom(appd, self.image_id_map)
         _set_vmtools_cdrom(appd, self.image_id_map)
+        _set_iso_cdrom(appd, self.image_id_map)    
         _set_ak_sk(appd)
 
         LOG.info('app descriptions:\n%s', yaml.dump(appd, Dumper=yaml.SafeDumper))
