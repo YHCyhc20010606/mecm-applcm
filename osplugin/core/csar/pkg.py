@@ -126,7 +126,7 @@ def _set_vmtools_cdrom(appd, image_id_map):
         if template['type'] != 'tosca.nodes.nfv.Vdu.Compute':
             continue
         image = template['properties']['sw_image_data']['name']
-        logger.info('now imageId %s', image.image_id)
+        logger.info('now format %s', image_id_map[image]['format'])
         if image_id_map[image]['format'] != 'iso':
             continue
 
