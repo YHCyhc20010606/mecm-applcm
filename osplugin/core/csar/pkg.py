@@ -74,13 +74,14 @@ def _set_iso_cdrom(appd, image_id_map):
     """
     topology_template = appd['topology_template']
     volume_templates = {}
+    logger.info('_set_iso_cdrom starting.')
     for node_name, template in topology_template['node_templates'].items():
         if template['type'] != 'tosca.nodes.nfv.Vdu.Compute':
             continue
         image = template['properties']['sw_image_data']['name']
         if image_id_map[image]['format'] != 'iso':
             continue
-
+        logger.info('now format %s', image_id_map[image]['format'])
         # 处理镜像
         template['properties']['sw_image_data']['name'] = 'empty-disk'
 
@@ -108,7 +109,7 @@ def _set_iso_cdrom(appd, image_id_map):
             'virtual_storage': volume_node_name
         })
     topology_template['node_templates'].update(volume_templates)
-
+    logger.info('_set_iso_cdrom end.')
 
 def _set_vmtools_cdrom(appd, image_id_map):
     """
@@ -126,7 +127,6 @@ def _set_vmtools_cdrom(appd, image_id_map):
         if template['type'] != 'tosca.nodes.nfv.Vdu.Compute':
             continue
         image = template['properties']['sw_image_data']['name']
-        logger.info('now format %s', image_id_map[image]['format'])
         if image_id_map[image]['format'] != 'iso':
             continue
 
@@ -295,7 +295,7 @@ class CsarPkg:
         _set_vmtools_cdrom(appd, self.image_id_map)
         _set_ak_sk(appd)
 
-        LOG.debug('app descriptions:\n%s', yaml.dump(appd, Dumper=yaml.SafeDumper))
+        LOG.info('app descriptions:\n%s', yaml.dump(appd, Dumper=yaml.SafeDumper))
 
         hot = translator.translate(appd, self.image_id_map)
 
