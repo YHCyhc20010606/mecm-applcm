@@ -134,7 +134,7 @@ def _set_vmtools_cdrom(appd, image_id_map):
         properties = {
             'virtual_storage_data': {
                 'type_of_storage': 'block_storage',
-                'size_of_storage': 1000
+                'size_of_storage': 2
             },
             'sw_image_data': {'name': 'vmtools'},
         }
