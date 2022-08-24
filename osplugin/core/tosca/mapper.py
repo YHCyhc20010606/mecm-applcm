@@ -143,6 +143,9 @@ def mapping_require_storage(requirement, **kwargs):
                 sw_image_map[block_storage['sw_image_data']['name']]['format'] == 'iso':
             block_device_mapping_v2['boot_index'] = 1
             block_device_mapping_v2['device_type'] = 'cdrom'
+        if block_device_mapping_v2['volume_id']['get_resource'] == 'VMTOOLS_CDROM':
+            block_device_mapping_v2['boot_index'] = -1
+            block_device_mapping_v2['device_type'] = 'cdrom'
 
     return block_device_mapping_v2
 
