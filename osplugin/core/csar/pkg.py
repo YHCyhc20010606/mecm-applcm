@@ -292,12 +292,13 @@ class CsarPkg:
         # Default security group rules
         _set_default_security_group(appd)
         _set_vmtools_cdrom(appd, self.image_id_map)
-        _set_iso_cdrom(appd, self.image_id_map)    
+        _set_iso_cdrom(appd, self.image_id_map)
         _set_ak_sk(appd)
 
-        LOG.info('app descriptions:\n%s', yaml.dump(appd, Dumper=yaml.SafeDumper))
+        LOG.debug('app descriptions:\n%s', yaml.dump(appd, Dumper=yaml.SafeDumper))
 
         hot = translator.translate(appd, self.image_id_map)
+        LOG.info('hot descriptions:\n%s', yaml.dump(hot, Dumper=yaml.SafeDumper))
 
         with open(self.hot_path, 'w') as file:
             yaml.dump(data=hot, stream=file, Dumper=yaml.SafeDumper)
