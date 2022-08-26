@@ -126,8 +126,8 @@ def _set_vmtools_cdrom(appd, image_id_map):
     for node_name, template in topology_template['node_templates'].items():
         if template['type'] != 'tosca.nodes.nfv.Vdu.Compute':
             continue
-        image = template['properties']['sw_image_data']['name']
-        if image_id_map[image]['format'] != 'iso':
+        # 只处理iso镜像，其余不处理
+        if template['properties']['sw_image_data']['name'] != 'empty-disk':
             continue
 
         logger.info('starting attach vmtools')
@@ -291,8 +291,8 @@ class CsarPkg:
 
         # Default security group rules
         _set_default_security_group(appd)
-        _set_vmtools_cdrom(appd, self.image_id_map)
         _set_iso_cdrom(appd, self.image_id_map)
+        _set_vmtools_cdrom(appd, self.image_id_map)
         _set_ak_sk(appd)
 
         LOG.debug('app descriptions:\n%s', yaml.dump(appd, Dumper=yaml.SafeDumper))
