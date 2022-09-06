@@ -758,7 +758,6 @@ func DoPrepareParams(c *LcmControllerV2, params *models.AppInfoParams, bKey []by
 }
 
 func DoInstantiate(c *LcmControllerV2, params *models.AppInfoParams, bKey []byte, req models.InstantiateRequest) {
-    var aca config.AppConfigAdapter
 	pluginInfo := util.GetPluginInfo(params.Vim)
 	client, err := pluginAdapter.GetClient(pluginInfo)
 	if err != nil {
@@ -768,10 +767,10 @@ func DoInstantiate(c *LcmControllerV2, params *models.AppInfoParams, bKey []byte
 		return
 	}
 
+    var acm config.AppConfigAdapter
 	if checkYamlContainService(params.TenantId, params.AppPackageId, params.AppName) {
 	    log.Info("enter process Ak SK config...")
 	    err, acm := ProcessAkSkConfig(params.AppInstanceId, params.AppName, &req, params.ClientIP, params.TenantId)
-	    aca = acm
     	if err != nil {
     		c.HandleForErrorCode(params.ClientIP, util.StatusInternalServerError, err.Error(), util.ErrCodeProcessAkSkFailed)
     		util.ClearByteArray(bKey)
@@ -803,16 +802,12 @@ func DoInstantiate(c *LcmControllerV2, params *models.AppInfoParams, bKey []byte
 	err, status := adapter.Instantiate(params.ConfitTenantId, params.AccessToken, params.AppInstanceId, req)
 	util.ClearByteArray(bKey)
 	if err != nil {
-	    if aca != nil {
-	        c.HandleErrorForInstantiateApp(aca, params.ClientIP, params.AppInstanceId, params.TenantId)
-	    }
+	    c.HandleErrorForInstantiateApp(aca, params.ClientIP, params.AppInstanceId, params.TenantId)
 		c.HandleForErrorCode(params.ClientIP, util.StatusInternalServerError, err.Error(), util.ErrCodePluginReportFailed)
 		return
 	}
 	if status == util.Failure {
-	    if aca != nil {
-	        c.HandleErrorForInstantiateApp(aca, params.ClientIP, params.AppInstanceId, params.TenantId)
-	    }
+	    c.HandleErrorForInstantiateApp(aca, params.ClientIP, params.AppInstanceId, params.TenantId)
 		c.HandleForErrorCode(params.ClientIP, util.StatusInternalServerError, util.FailedToInstantiate,
 			util.ErrCodePluginInstFailed)
 		err = errors.New(util.FailedToInstantiate)
@@ -867,20 +862,17 @@ func checkYamlContainService(tenantId, appPackageId, appName string) bool{
 
 	for _, filename := range allFiles {
     if checkLineContainSth(filename, appName) {
-
-      appYaml, err := os.Open(filename)
+        appYaml, err := os.Open(filename)
 	    if err != nil {
 		    log.Error("open yaml failed! " + err.Error())
 		    return false
 	     }
-	   defer appYaml.Close()
-
-	   if ReadAppYamlVal(appYaml) {
+	     defer appYaml.Close()
+         if ReadAppYamlVal(appYaml) {
 	       	return true
 	     }
     }
-
-	}
+    }
 	return false
 
 }
@@ -898,7 +890,6 @@ func readDirFile(dir string) []string {
 			allFiles = append(allFiles, dir + "/" + file.Name())
 		}
 	}
-
   return allFiles
 }
 
@@ -916,7 +907,7 @@ func ReadAppYamlVal(appYaml *os.File) bool{
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		if checkLineContainSth(line, "app_configuration") {
+		if checkLineContainSth(line, "appId") {
 			return true
 		}
 	}
