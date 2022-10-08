@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"lcmcontroller/config"
 	"lcmcontroller/models"
 	"lcmcontroller/pkg/pluginAdapter"
@@ -39,6 +40,8 @@ import (
 
 	log "github.com/sirupsen/logrus"
 )
+
+var allFiles []string
 
 // Lcm Controller
 type LcmControllerV2 struct {
@@ -763,11 +766,16 @@ func DoInstantiate(c *LcmControllerV2, params *models.AppInfoParams, bKey []byte
 			util.ErrCodeFailedGetPlugin)
 		return
 	}
-	err, acm := ProcessAkSkConfig(params.AppInstanceId, params.AppName, &req, params.ClientIP, params.TenantId)
-	if err != nil {
-		c.HandleForErrorCode(params.ClientIP, util.StatusInternalServerError, err.Error(), util.ErrCodeProcessAkSkFailed)
-		util.ClearByteArray(bKey)
-		return
+
+    var acm config.AppConfigAdapter
+	if checkYamlContainService(params.TenantId, params.AppPackageId, params.AppName) {
+	    log.Info("enter process Ak SK config...")
+	    err, acm := ProcessAkSkConfig(params.AppInstanceId, params.AppName, &req, params.ClientIP, params.TenantId)
+    	if err != nil {
+    		c.HandleForErrorCode(params.ClientIP, util.StatusInternalServerError, err.Error(), util.ErrCodeProcessAkSkFailed)
+    		util.ClearByteArray(bKey)
+    		return
+    	}
 	}
 
 	err = c.InsertOrUpdateTenantRecord(params.ClientIP, params.TenantId)
@@ -794,18 +802,116 @@ func DoInstantiate(c *LcmControllerV2, params *models.AppInfoParams, bKey []byte
 	err, status := adapter.Instantiate(params.ConfitTenantId, params.AccessToken, params.AppInstanceId, req)
 	util.ClearByteArray(bKey)
 	if err != nil {
-		c.HandleErrorForInstantiateApp(acm, params.ClientIP, params.AppInstanceId, params.TenantId)
+	    c.HandleErrorForInstantiateApp(acm, params.ClientIP, params.AppInstanceId, params.TenantId)
 		c.HandleForErrorCode(params.ClientIP, util.StatusInternalServerError, err.Error(), util.ErrCodePluginReportFailed)
 		return
 	}
 	if status == util.Failure {
-		c.HandleErrorForInstantiateApp(acm, params.ClientIP, params.AppInstanceId, params.TenantId)
+	    c.HandleErrorForInstantiateApp(acm, params.ClientIP, params.AppInstanceId, params.TenantId)
 		c.HandleForErrorCode(params.ClientIP, util.StatusInternalServerError, util.FailedToInstantiate,
 			util.ErrCodePluginInstFailed)
 		err = errors.New(util.FailedToInstantiate)
 		return
 	}
 	c.handleLoggingForSuccess(nil, params.ClientIP, "Application instantiated successfully")
+}
+
+func checkYamlContainService(tenantId, appPackageId, appName string) bool{
+	var zipFile string
+
+	//step1: find csar, unzip
+	csarPath := PackageFolderPath + tenantId + "/" + appPackageId + "/" + appPackageId + ".csar"
+	packagePath, err := extractCsarPackage(csarPath)
+	if err != nil {
+	    log.Error("extract csar package failed! " + err.Error())
+		return false
+	}
+
+	//step2: find zip file under folder APPD, unzip
+	files, err := ioutil.ReadDir(packagePath + "/" + "APPD")
+	if err != nil {
+	    log.Error("read dir APPD failed! " + err.Error())
+	    return false
+	}
+
+	for _, filename := range files {
+		if strings.HasSuffix(filepath.Ext(filename.Name()),".zip") {
+			zipFile = filename.Name()
+			break
+		}
+	}
+
+	if zipFile == "" {
+	    log.Error("not found zip file under dir APPD!")
+		return false
+	}
+
+	zipDir, err := extractCsarPackage(packagePath + "/" + "APPD" + "/" + zipFile)
+	if err != nil {
+		log.Error("extract zip package failed! " + err.Error())
+		res = false
+	}
+
+	//step3: check yaml contain app_configuration
+	allFiles := readDirFile(zipDir + "/Definition")
+
+	if len(allFiles) == 0 {
+	    log.Error("no files under unzipped zip file! ")
+		return false
+	}
+
+	for _, filename := range allFiles {
+    if checkLineContainSth(filename, appName) {
+        appYaml, err := os.Open(filename)
+	    if err != nil {
+		    log.Error("open yaml failed! " + err.Error())
+		    return false
+	     }
+	     defer appYaml.Close()
+         if ReadAppYamlVal(appYaml) {
+	       	return true
+	     }
+    }
+    }
+	return false
+
+}
+
+func readDirFile(dir string) []string {
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		log.Error("read dir " + dir + "failed!")
+	}
+
+	for _, file := range files {
+		if file.IsDir() {
+			readDirFile(dir + "/" + file.Name())
+		} else {
+			allFiles = append(allFiles, dir + "/" + file.Name())
+		}
+	}
+  return allFiles
+}
+
+
+func checkLineContainSth(line string, s string) bool {
+	res := false
+	res = strings.Contains(line, s)
+	return res
+}
+
+
+func ReadAppYamlVal(appYaml *os.File) bool{
+	scanner := bufio.NewScanner(appYaml)
+	scanner.Split(bufio.ScanLines)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if checkLineContainSth(line, "appId") {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *LcmControllerV2) ValidateToken(accessToken string, req models.InstantiateRequest, clientIp string) (string, string, string, string, string, error) {
