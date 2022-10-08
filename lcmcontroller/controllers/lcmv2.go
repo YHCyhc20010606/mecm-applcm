@@ -767,10 +767,11 @@ func DoInstantiate(c *LcmControllerV2, params *models.AppInfoParams, bKey []byte
 		return
 	}
 
-  //  var acm config.AppConfigAdapter
+    var aca config.AppConfigAdapter
 	if checkYamlContainService(params.TenantId, params.AppPackageId, params.AppName) {
 	    log.Info("enter process Ak SK config...")
 	    err, acm := ProcessAkSkConfig(params.AppInstanceId, params.AppName, &req, params.ClientIP, params.TenantId)
+	    aca = acm
     	if err != nil {
     		c.HandleForErrorCode(params.ClientIP, util.StatusInternalServerError, err.Error(), util.ErrCodeProcessAkSkFailed)
     		util.ClearByteArray(bKey)
@@ -802,12 +803,16 @@ func DoInstantiate(c *LcmControllerV2, params *models.AppInfoParams, bKey []byte
 	err, status := adapter.Instantiate(params.ConfitTenantId, params.AccessToken, params.AppInstanceId, req)
 	util.ClearByteArray(bKey)
 	if err != nil {
-	    c.HandleErrorForInstantiateApp(acm, params.ClientIP, params.AppInstanceId, params.TenantId)
+	    if aca != nil {
+	       c.HandleErrorForInstantiateApp(aca, params.ClientIP, params.AppInstanceId, params.TenantId)
+	    }
 		c.HandleForErrorCode(params.ClientIP, util.StatusInternalServerError, err.Error(), util.ErrCodePluginReportFailed)
 		return
 	}
 	if status == util.Failure {
-	    c.HandleErrorForInstantiateApp(acm, params.ClientIP, params.AppInstanceId, params.TenantId)
+	    if aca != nil {
+	       c.HandleErrorForInstantiateApp(aca, params.ClientIP, params.AppInstanceId, params.TenantId)
+	    }
 		c.HandleForErrorCode(params.ClientIP, util.StatusInternalServerError, util.FailedToInstantiate,
 			util.ErrCodePluginInstFailed)
 		err = errors.New(util.FailedToInstantiate)
