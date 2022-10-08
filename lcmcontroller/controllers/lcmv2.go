@@ -803,16 +803,12 @@ func DoInstantiate(c *LcmControllerV2, params *models.AppInfoParams, bKey []byte
 	err, status := adapter.Instantiate(params.ConfitTenantId, params.AccessToken, params.AppInstanceId, req)
 	util.ClearByteArray(bKey)
 	if err != nil {
-	    if !aca.IsEmpty() {
-	       c.HandleErrorForInstantiateApp(aca, params.ClientIP, params.AppInstanceId, params.TenantId)
-	    }
+	    c.HandleErrorForInstantiateApp(aca, params.ClientIP, params.AppInstanceId, params.TenantId)
 		c.HandleForErrorCode(params.ClientIP, util.StatusInternalServerError, err.Error(), util.ErrCodePluginReportFailed)
 		return
 	}
 	if status == util.Failure {
-	    if !aca.IsEmpty() {
-	       c.HandleErrorForInstantiateApp(aca, params.ClientIP, params.AppInstanceId, params.TenantId)
-	    }
+	    c.HandleErrorForInstantiateApp(aca, params.ClientIP, params.AppInstanceId, params.TenantId)
 		c.HandleForErrorCode(params.ClientIP, util.StatusInternalServerError, util.FailedToInstantiate,
 			util.ErrCodePluginInstFailed)
 		err = errors.New(util.FailedToInstantiate)
