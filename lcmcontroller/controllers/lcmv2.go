@@ -768,7 +768,7 @@ func DoInstantiate(c *LcmControllerV2, params *models.AppInfoParams, bKey []byte
 	}
 
     var aca config.AppConfigAdapter
-    log.Info("checkYamlContainService:"+checkYamlContainService(params.TenantId, params.AppPackageId, params.AppName))
+    log.Info(checkYamlContainService(params.TenantId, params.AppPackageId, params.AppName))
 	if checkYamlContainService(params.TenantId, params.AppPackageId, params.AppName) {
 	    log.Info("enter process Ak SK config...")
 	    err, acm := ProcessAkSkConfig(params.AppInstanceId, params.AppName, &req, params.ClientIP, params.TenantId)
@@ -870,7 +870,7 @@ func checkYamlContainService(tenantId, appPackageId, appName string) bool{
 		    return false
 	     }
 	     defer appYaml.Close()
-	     log.Info("readBool:"+ReadAppYamlVal(appYaml))
+	     log.Info(ReadAppYamlVal(appYaml))
          if ReadAppYamlVal(appYaml) {
 	       	return true
 	     }
