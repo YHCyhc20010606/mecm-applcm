@@ -849,7 +849,7 @@ func checkYamlContainService(tenantId, appPackageId, appName string) bool{
 	zipDir, err := extractCsarPackage(packagePath + "/" + "APPD" + "/" + zipFile)
 	if err != nil {
 		log.Error("extract zip package failed! " + err.Error())
-		res = false
+		return false
 	}
 
 	//step3: check yaml contain app_configuration
