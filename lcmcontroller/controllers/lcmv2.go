@@ -858,7 +858,7 @@ func checkYamlContainService(tenantId, appPackageId, appName string) bool{
 		log.Error("extract zip package failed! " + err.Error())
 		return false
 	}
-
+    log.info("zipDir:" + zipDir)
 	//step3: check yaml contain app_configuration
 	allFiles := readDirFile(zipDir + "/Definition")
 
@@ -868,6 +868,7 @@ func checkYamlContainService(tenantId, appPackageId, appName string) bool{
 	}
 
 	for _, filename := range allFiles {
+	log.Info("filePath:" + filename)
     if checkLineContainSth(filename, appName) {
         appYaml, err := os.Open(filename)
 	    if err != nil {
@@ -880,6 +881,7 @@ func checkYamlContainService(tenantId, appPackageId, appName string) bool{
 	     }
     }
     }
+    log.Info("execute return false..")
 	return false
 
 }
