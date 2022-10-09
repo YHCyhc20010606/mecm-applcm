@@ -768,7 +768,9 @@ func DoInstantiate(c *LcmControllerV2, params *models.AppInfoParams, bKey []byte
 	}
 
     var aca config.AppConfigAdapter
-    log.Info(checkYamlContainService(params.TenantId, params.AppPackageId, params.AppName))
+    log.Info("params-packageId:" + params.AppPackageId)
+    log.Info("params-appInstanceId:" + params.AppInstanceId)
+    log.Info("req-packageId:" + req.PackageId)
 	if checkYamlContainService(params.TenantId, params.AppPackageId, params.AppName) {
 	    log.Info("enter process Ak SK config...")
 	    err, acm := ProcessAkSkConfig(params.AppInstanceId, params.AppName, &req, params.ClientIP, params.TenantId)
@@ -779,7 +781,10 @@ func DoInstantiate(c *LcmControllerV2, params *models.AppInfoParams, bKey []byte
     		return
     	}
 	}
-
+   log.Info("aca-AppInsId:" + aca.AppAuthCfg.AppInsId)
+   log.Info("aca-Ak:" + aca.AppAuthCfg.Ak)
+   log.Info("aca-Sk:" + aca.AppAuthCfg.Sk)
+   log.Info("aca-AppName:" + aca.AppAuthCfg.AppName)
 	err = c.InsertOrUpdateTenantRecord(params.ClientIP, params.TenantId)
 	if err != nil {
 		util.ClearByteArray(bKey)
@@ -866,11 +871,10 @@ func checkYamlContainService(tenantId, appPackageId, appName string) bool{
     if checkLineContainSth(filename, appName) {
         appYaml, err := os.Open(filename)
 	    if err != nil {
-		    log.Error("open yaml failed! " + err.Error())
+	        log.Error("open yaml failed! " + err.Error())
 		    return false
 	     }
 	     defer appYaml.Close()
-	     log.Info(ReadAppYamlVal(appYaml))
          if ReadAppYamlVal(appYaml) {
 	       	return true
 	     }
