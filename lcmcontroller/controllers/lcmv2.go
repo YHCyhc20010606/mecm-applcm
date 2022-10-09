@@ -871,10 +871,10 @@ func checkYamlContainService(tenantId, appPackageId, appName string) bool{
     if checkLineContainSth(filename, appName) {
         appYaml, err := os.Open(filename)
 	    if err != nil {
+	        log.Error("open yaml failed! " + err.Error())
 		    return false
 	     }
 	     defer appYaml.Close()
-	     log.Info(ReadAppYamlVal(appYaml))
          if ReadAppYamlVal(appYaml) {
 	       	return true
 	     }
