@@ -869,7 +869,6 @@ func checkYamlContainService(tenantId, appPackageId, appName string) bool{
 
 	for _, filename := range allFiles {
 	log.Info("filePath:" + filename)
-	//TODO 判断如果filename不含有appPackageId，就把appPackageId替换进去
     if checkLineContainSth(filename, appName) {
         appYaml, err := os.Open(filename)
 	    if err != nil {
