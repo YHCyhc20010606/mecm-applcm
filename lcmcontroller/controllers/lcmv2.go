@@ -869,6 +869,9 @@ func checkYamlContainService(tenantId, appPackageId, appName string) bool{
 
 	for _, filename := range allFiles {
 	log.Info("filePath:" + filename)
+	if !checkLineContainSth(filename, appPackageId){
+    	filename = filename[0:55] + appPackageId + filename[119:]
+    }
     if checkLineContainSth(filename, appName) {
         appYaml, err := os.Open(filename)
 	    if err != nil {
