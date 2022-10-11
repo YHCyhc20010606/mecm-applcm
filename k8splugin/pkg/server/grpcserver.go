@@ -616,7 +616,16 @@ func (s *ServerGRPC) validateInputParamsForInstantiate(
 
 	parameters := req.GetParameters()
 	ak = parameters["ak"]
+	if ak == "" {
+    		return "", "", "", "",  "", "", s.logError(status.Error(codes.InvalidArgument,
+    			util.AKIsInvalid))
+    	}
 	sk = parameters["sk"]
+    if sk == "" {
+    		return "", "", "", "",  "", "", s.logError(status.Error(codes.InvalidArgument,
+    			util.SKIsInvalid))
+    	}
+
 
 	appInsId = req.GetAppInstanceId()
 	err = util.ValidateUUID(appInsId)
