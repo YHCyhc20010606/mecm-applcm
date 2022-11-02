@@ -767,24 +767,24 @@ func DoInstantiate(c *LcmControllerV2, params *models.AppInfoParams, bKey []byte
 		return
 	}
 
-    var aca config.AppConfigAdapter
-    log.Info("params-packageId:" + params.AppPackageId)
-    log.Info("params-appInstanceId:" + params.AppInstanceId)
-    log.Info("req-packageId:" + req.PackageId)
-	if checkYamlContainService(params.TenantId, params.AppPackageId, params.AppName) {
+    // var aca config.AppConfigAdapter
+    // log.Info("params-packageId:" + params.AppPackageId)
+    // log.Info("params-appInstanceId:" + params.AppInstanceId)
+    // log.Info("req-packageId:" + req.PackageId)
+	// if checkYamlContainService(params.TenantId, params.AppPackageId, params.AppName) {
 	    log.Info("enter process Ak SK config...")
 	    err, acm := ProcessAkSkConfig(params.AppInstanceId, params.AppName, &req, params.ClientIP, params.TenantId)
-	    aca = acm
+	    // aca = acm
     	if err != nil {
     		c.HandleForErrorCode(params.ClientIP, util.StatusInternalServerError, err.Error(), util.ErrCodeProcessAkSkFailed)
     		util.ClearByteArray(bKey)
     		return
     	}
-	}
-   log.Info("aca-AppInsId:" + aca.AppAuthCfg.AppInsId)
-   log.Info("aca-Ak:" + aca.AppAuthCfg.Ak)
-   log.Info("aca-Sk:" + aca.AppAuthCfg.Sk)
-   log.Info("aca-AppName:" + aca.AppAuthCfg.AppName)
+	// }
+   // log.Info("aca-AppInsId:" + aca.AppAuthCfg.AppInsId)
+   // log.Info("aca-Ak:" + aca.AppAuthCfg.Ak)
+   // log.Info("aca-Sk:" + aca.AppAuthCfg.Sk)
+   // log.Info("aca-AppName:" + aca.AppAuthCfg.AppName)
 	err = c.InsertOrUpdateTenantRecord(params.ClientIP, params.TenantId)
 	if err != nil {
 		util.ClearByteArray(bKey)
@@ -809,12 +809,12 @@ func DoInstantiate(c *LcmControllerV2, params *models.AppInfoParams, bKey []byte
 	err, status := adapter.Instantiate(params.ConfitTenantId, params.AccessToken, params.AppInstanceId, req)
 	util.ClearByteArray(bKey)
 	if err != nil {
-	    c.HandleErrorForInstantiateApp(aca, params.ClientIP, params.AppInstanceId, params.TenantId)
+	    c.HandleErrorForInstantiateApp(acm, params.ClientIP, params.AppInstanceId, params.TenantId)
 		c.HandleForErrorCode(params.ClientIP, util.StatusInternalServerError, err.Error(), util.ErrCodePluginReportFailed)
 		return
 	}
 	if status == util.Failure {
-	    c.HandleErrorForInstantiateApp(aca, params.ClientIP, params.AppInstanceId, params.TenantId)
+	    c.HandleErrorForInstantiateApp(acm, params.ClientIP, params.AppInstanceId, params.TenantId)
 		c.HandleForErrorCode(params.ClientIP, util.StatusInternalServerError, util.FailedToInstantiate,
 			util.ErrCodePluginInstFailed)
 		err = errors.New(util.FailedToInstantiate)
