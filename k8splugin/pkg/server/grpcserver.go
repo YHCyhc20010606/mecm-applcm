@@ -19,8 +19,10 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/tap"
@@ -33,10 +35,13 @@ import (
 	"k8splugin/pkg/adapter"
 	"k8splugin/util"
 	"net"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -44,6 +49,10 @@ import (
 	"google.golang.org/grpc/credentials"
 	_ "google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/status"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 var (
@@ -364,6 +373,14 @@ func (s *ServerGRPC) Instantiate(ctx context.Context,
 		s.displayResponseMsg(ctx, util.Instantiate, util.FailedToValInputParams)
 		return resp, err
 	}
+	// [NetworkPlane DEBUG] 节点4: k8splugin gRPC server 收到请求，打印 parameters
+	log.Infof("[NetworkPlane] [4/5] k8splugin grpcserver Instantiate, appInsId=%s, parameters count=%d", appInsId, len(req.Parameters))
+	for k, v := range req.Parameters {
+		log.Infof("[NetworkPlane] [4/5]   param key=%s  value=%s", k, v)
+	}
+	if _, ok := req.Parameters["networkPlane"]; !ok {
+		log.Warn("[NetworkPlane] [4/5]   WARNING: key 'networkPlane' NOT found, will use default network")
+	}
 	appPkgRecord := &models.AppPackage{
 		AppPkgId: packageId + tenantId + hostIp,
 	}
@@ -381,21 +398,683 @@ func (s *ServerGRPC) Instantiate(ctx context.Context,
 		return resp, err
 	}
 
-	releaseName, namespace, err := client.Deploy(appPkgRecord, appInsId, ak, sk, s.db)
+	// [修改] 2026-01-19 网络平面功能：将前端传递的 parameters 参数传递给 Deploy 方法
+	// 原始调用: client.Deploy(appPkgRecord, appInsId, ak, sk, s.db)
+	// 新增参数: req.Parameters - 包含 networkPlane 等前端配置
+	releaseName, namespace, err := client.Deploy(appPkgRecord, appInsId, ak, sk, req.Parameters, s.db)
 	if err != nil {
 		log.Info("instantiation failed")
 		s.displayResponseMsg(ctx, util.Instantiate, "instantiation failed")
 		return resp, err
 	}
-	err = s.insertOrUpdateAppInsRecord(appInsId, hostIp, releaseName, namespace)
+
+	networkPlane := util.Default
+	if req.Parameters != nil {
+		if selectedNetwork, ok := req.Parameters["networkPlane"]; ok && selectedNetwork != "" {
+			networkPlane = selectedNetwork
+		}
+	}
+	err = s.insertOrUpdateAppInsRecord(appInsId, hostIp, releaseName, namespace, "")
 	if err != nil {
 		s.displayResponseMsg(ctx, util.Instantiate, "failed to insert or update app record")
 		return resp, err
 	}
+
+	go s.pollAndUpdateAppIp(appInsId, tenantId, hostIp, namespace, releaseName, networkPlane)
+
 	log.Info("successful instantiation")
 	resp.Status = util.Success
 	s.handleLoggingForSuccess(ctx, util.Instantiate, "Application instantiated successfully")
 	return resp, nil
+}
+
+func (s *ServerGRPC) pollAndUpdateAppIp(appInsId, tenantId, hostIp, namespace, releaseName, networkPlane string) {
+	const (
+		maxWaitSeconds = 600
+		retryInterval  = 2 * time.Second
+	)
+
+	start := time.Now()
+	attempt := 0
+	for time.Since(start) < maxWaitSeconds*time.Second {
+		attempt++
+		log.Infof("[AppIP] polling start appInsId=%s releaseName=%s namespace=%s attempt=%d networkPlane=%s",
+			appInsId, releaseName, namespace, attempt, networkPlane)
+		appIp, appIpErr := s.getAppIpByNetworkPlane(tenantId, hostIp, namespace, releaseName, networkPlane)
+		if appIpErr == nil && appIp != "" {
+			updateErr := s.insertOrUpdateAppInsRecord(appInsId, hostIp, releaseName, namespace, appIp)
+			if updateErr != nil {
+				log.Warnf("found app ip %s but failed to update app_instance_info, appInsId=%s, err=%v", appIp, appInsId, updateErr)
+				return
+			}
+			log.Infof("app ip updated successfully, appInsId=%s, appIp=%s", appInsId, appIp)
+			pushErr := s.pushAppIpToAppo(tenantId, appInsId, appIp)
+			if pushErr != nil {
+				log.Warnf("[AppIPPush] push failed appInsId=%s appIp=%s err=%v", appInsId, appIp, pushErr)
+			} else {
+				log.Infof("[AppIPPush] push success appInsId=%s appIp=%s", appInsId, appIp)
+			}
+			portsJson, portsErr := s.getAppPortsJson(tenantId, hostIp, namespace, releaseName)
+			if portsErr != nil {
+				log.Infof("[AppPorts] collect failed appInsId=%s releaseName=%s attempt=%d err=%v",
+					appInsId, releaseName, attempt, portsErr)
+			} else if portsJson != "" {
+				portsPushErr := s.pushAppPortsToAppo(tenantId, appInsId, portsJson)
+				if portsPushErr != nil {
+					log.Warnf("[AppPortsPush] push failed appInsId=%s err=%v", appInsId, portsPushErr)
+				} else {
+					log.Infof("[AppPortsPush] push success appInsId=%s", appInsId)
+				}
+			}
+			return
+		}
+		if appIpErr != nil {
+			log.Infof("[AppIP] polling no-result appInsId=%s releaseName=%s attempt=%d err=%v", appInsId, releaseName, attempt, appIpErr)
+		}
+
+		time.Sleep(retryInterval)
+	}
+
+	log.Warnf("timeout waiting app ip from network-status/pod ip, appInsId=%s, releaseName=%s", appInsId, releaseName)
+}
+
+func (s *ServerGRPC) getAppPortsJson(tenantId, hostIp, namespace, releaseName string) (string, error) {
+	kubeConfigPath := KubeconfigPath + tenantId + "/" + hostIp
+	kubeConfig, err := clientcmd.BuildConfigFromFlags("", kubeConfigPath)
+	if err != nil {
+		return "", err
+	}
+	clientset, err := kubernetes.NewForConfig(kubeConfig)
+	if err != nil {
+		return "", err
+	}
+
+	pods, err := s.getReleasePods(clientset, namespace, releaseName)
+	if err != nil {
+		return "", err
+	}
+
+	services, err := clientset.CoreV1().Services(namespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return "", err
+	}
+	return BuildAppPortsJson(pods, services)
+}
+
+func BuildAppPortsJson(pods *v1.PodList, services *v1.ServiceList) (string, error) {
+	type containerPortEntry struct {
+		Pod       string `json:"pod"`
+		Container string `json:"container"`
+		Port      int32  `json:"port"`
+		Protocol  string `json:"protocol"`
+		Name      string `json:"name"`
+	}
+	type servicePortEntry struct {
+		Service    string `json:"service"`
+		Type       string `json:"type"`
+		Port       int32  `json:"port"`
+		TargetPort string `json:"targetPort"`
+		NodePort   int32  `json:"nodePort"`
+		Protocol   string `json:"protocol"`
+		Name       string `json:"name"`
+	}
+	type appPortsPayload struct {
+		ContainerPorts []containerPortEntry `json:"containerPorts"`
+		ServicePorts   []servicePortEntry   `json:"servicePorts"`
+	}
+
+	payload := appPortsPayload{
+		ContainerPorts: make([]containerPortEntry, 0),
+		ServicePorts:   make([]servicePortEntry, 0),
+	}
+
+	if pods != nil {
+		for _, pod := range pods.Items {
+			for _, c := range pod.Spec.Containers {
+				for _, p := range c.Ports {
+					proto := string(p.Protocol)
+					if proto == "" {
+						proto = "TCP"
+					}
+					payload.ContainerPorts = append(payload.ContainerPorts, containerPortEntry{
+						Pod:       pod.Name,
+						Container: c.Name,
+						Port:      p.ContainerPort,
+						Protocol:  proto,
+						Name:      p.Name,
+					})
+				}
+			}
+		}
+	}
+
+	if services != nil {
+		for _, svc := range services.Items {
+			for _, sp := range svc.Spec.Ports {
+				targetPort := ""
+				if sp.TargetPort.Type == 0 {
+					targetPort = fmt.Sprint(sp.TargetPort.IntVal)
+				} else if sp.TargetPort.Type == 1 {
+					targetPort = sp.TargetPort.StrVal
+				} else {
+					targetPort = fmt.Sprint(sp.TargetPort.IntVal)
+				}
+				payload.ServicePorts = append(payload.ServicePorts, servicePortEntry{
+					Service:    svc.Name,
+					Type:       string(svc.Spec.Type),
+					Port:       sp.Port,
+					TargetPort: targetPort,
+					NodePort:   sp.NodePort,
+					Protocol:   string(sp.Protocol),
+					Name:       sp.Name,
+				})
+			}
+		}
+	}
+
+	if len(payload.ContainerPorts) == 0 && len(payload.ServicePorts) == 0 {
+		return "", errors.New("no ports found")
+	}
+
+	bytes, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return string(bytes), nil
+}
+
+type appIpPushRequest struct {
+	AppIp  string `json:"appIp"`
+	Source string `json:"source"`
+}
+
+type appPortsPushRequest struct {
+	AppPorts string `json:"appPorts"`
+	Source   string `json:"source"`
+}
+
+func (s *ServerGRPC) pushAppIpToAppo(tenantId, appInsId, appIp string) error {
+	if strings.EqualFold(os.Getenv("APPO_APPIP_PUSH_ENABLED"), "false") {
+		log.Infof("[AppIPPush] skip by config appInsId=%s", appInsId)
+		return nil
+	}
+
+	scheme := getEnvOrDefault("APPO_ENDPOINT_SCHEME", "http")
+	host := getEnvOrDefault("APPO_ENDPOINT_HOST", "mecm-appo")
+	port := getEnvOrDefault("APPO_ENDPOINT_PORT", "8091")
+	url := fmt.Sprintf("%s://%s:%s/appo/v1/internal/tenants/%s/app_instance_infos/%s/app_ip",
+		scheme, host, port, tenantId, appInsId)
+
+	body, err := json.Marshal(appIpPushRequest{AppIp: appIp, Source: "k8splugin"})
+	if err != nil {
+		return err
+	}
+
+	isTLS := strings.HasPrefix(strings.ToLower(url), "https://")
+	client := newAppoPushHTTPClient(isTLS)
+	if isTLS {
+		log.Infof("[AppIPPush] tls config appInsId=%s tlsServerName=%s insecureSkipVerify=%v",
+			appInsId, getEnvOrDefault("APPO_TLS_SERVER_NAME", ""),
+			strings.EqualFold(os.Getenv("APPO_TLS_INSECURE_SKIP_VERIFY"), "true"))
+	}
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		log.Infof("[AppIPPush] pushing appInsId=%s attempt=%d url=%s", appInsId, attempt, url)
+		status, responseBody, sendErr := s.sendAppIpPushRequest(client, url, body)
+		if sendErr != nil {
+			lastErr = sendErr
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		if status >= 200 && status < 300 {
+			log.Infof("[AppIPPush] response success appInsId=%s status=%d body=%s",
+				appInsId, status, shortTextForLog(responseBody, 200))
+			return nil
+		}
+
+		if strings.Contains(strings.ToLower(responseBody), "requires tls") && !strings.HasPrefix(url, "https://") {
+			secureURL := strings.Replace(url, "http://", "https://", 1)
+			secureClient := newAppoPushHTTPClient(true)
+			log.Infof("[AppIPPush] endpoint requires TLS, retry with https appInsId=%s secureUrl=%s tlsServerName=%s insecureSkipVerify=%v",
+				appInsId, secureURL, getEnvOrDefault("APPO_TLS_SERVER_NAME", ""),
+				strings.EqualFold(os.Getenv("APPO_TLS_INSECURE_SKIP_VERIFY"), "true"))
+			secureStatus, secureBody, secureErr := s.sendAppIpPushRequest(secureClient, secureURL, body)
+			if secureErr == nil && secureStatus >= 200 && secureStatus < 300 {
+				log.Infof("[AppIPPush] response success (https fallback) appInsId=%s status=%d body=%s",
+					appInsId, secureStatus, shortTextForLog(secureBody, 200))
+				return nil
+			}
+			if secureErr != nil {
+				lastErr = secureErr
+			} else {
+				lastErr = fmt.Errorf("status=%d body=%s", secureStatus, shortTextForLog(secureBody, 200))
+			}
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		lastErr = fmt.Errorf("status=%d body=%s", status, shortTextForLog(responseBody, 200))
+		time.Sleep(2 * time.Second)
+	}
+
+	return lastErr
+}
+
+func (s *ServerGRPC) pushAppPortsToAppo(tenantId, appInsId, appPorts string) error {
+	if strings.EqualFold(os.Getenv("APPO_APPPORTS_PUSH_ENABLED"), "false") {
+		log.Infof("[AppPortsPush] skip by config appInsId=%s", appInsId)
+		return nil
+	}
+
+	scheme := getEnvOrDefault("APPO_ENDPOINT_SCHEME", "http")
+	host := getEnvOrDefault("APPO_ENDPOINT_HOST", "mecm-appo")
+	port := getEnvOrDefault("APPO_ENDPOINT_PORT", "8091")
+	url := fmt.Sprintf("%s://%s:%s/appo/v1/internal/tenants/%s/app_instance_infos/%s/app_ports",
+		scheme, host, port, tenantId, appInsId)
+
+	body, err := json.Marshal(appPortsPushRequest{AppPorts: appPorts, Source: "k8splugin"})
+	if err != nil {
+		return err
+	}
+
+	isTLS := strings.HasPrefix(strings.ToLower(url), "https://")
+	client := newAppoPushHTTPClient(isTLS)
+	if isTLS {
+		log.Infof("[AppPortsPush] tls config appInsId=%s tlsServerName=%s insecureSkipVerify=%v",
+			appInsId, getEnvOrDefault("APPO_TLS_SERVER_NAME", ""),
+			strings.EqualFold(os.Getenv("APPO_TLS_INSECURE_SKIP_VERIFY"), "true"))
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		log.Infof("[AppPortsPush] pushing appInsId=%s attempt=%d url=%s", appInsId, attempt, url)
+		status, responseBody, sendErr := s.sendAppIpPushRequest(client, url, body)
+		if sendErr != nil {
+			lastErr = sendErr
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		if status >= 200 && status < 300 {
+			log.Infof("[AppPortsPush] response success appInsId=%s status=%d body=%s",
+				appInsId, status, shortTextForLog(responseBody, 200))
+			return nil
+		}
+
+		if strings.Contains(strings.ToLower(responseBody), "requires tls") && !strings.HasPrefix(url, "https://") {
+			secureURL := strings.Replace(url, "http://", "https://", 1)
+			secureClient := newAppoPushHTTPClient(true)
+			log.Infof("[AppPortsPush] endpoint requires TLS, retry with https appInsId=%s secureUrl=%s tlsServerName=%s insecureSkipVerify=%v",
+				appInsId, secureURL, getEnvOrDefault("APPO_TLS_SERVER_NAME", ""),
+				strings.EqualFold(os.Getenv("APPO_TLS_INSECURE_SKIP_VERIFY"), "true"))
+			secureStatus, secureBody, secureErr := s.sendAppIpPushRequest(secureClient, secureURL, body)
+			if secureErr == nil && secureStatus >= 200 && secureStatus < 300 {
+				log.Infof("[AppPortsPush] response success (https fallback) appInsId=%s status=%d body=%s",
+					appInsId, secureStatus, shortTextForLog(secureBody, 200))
+				return nil
+			}
+			if secureErr != nil {
+				lastErr = secureErr
+			} else {
+				lastErr = fmt.Errorf("status=%d body=%s", secureStatus, shortTextForLog(secureBody, 200))
+			}
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		lastErr = fmt.Errorf("status=%d body=%s", status, shortTextForLog(responseBody, 200))
+		time.Sleep(2 * time.Second)
+	}
+
+	return lastErr
+}
+
+func newAppoPushHTTPClient(isTLS bool) *http.Client {
+	if !isTLS {
+		return &http.Client{Timeout: 5 * time.Second}
+	}
+
+	tlsServerName := strings.TrimSpace(os.Getenv("APPO_TLS_SERVER_NAME"))
+	insecureSkipVerify := strings.EqualFold(os.Getenv("APPO_TLS_INSECURE_SKIP_VERIFY"), "true")
+
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			ServerName:         tlsServerName,
+			InsecureSkipVerify: insecureSkipVerify,
+		},
+	}
+
+	return &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: transport,
+	}
+}
+
+func (s *ServerGRPC) sendAppIpPushRequest(client *http.Client, url string, body []byte) (int, string, error) {
+	req, reqErr := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(body))
+	if reqErr != nil {
+		return 0, "", reqErr
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, doErr := client.Do(req)
+	if doErr != nil {
+		return 0, "", doErr
+	}
+
+	respBody, _ := ioutil.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	return resp.StatusCode, string(respBody), nil
+}
+
+func getEnvOrDefault(key, defaultValue string) string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return defaultValue
+	}
+	return value
+}
+
+type networkStatusEntry struct {
+	Name    string   `json:"name"`
+	IPs     []string `json:"ips"`
+	Default bool     `json:"default"`
+}
+
+func (s *ServerGRPC) getAppIpByNetworkPlane(tenantId, hostIp, namespace, releaseName, networkPlane string) (string, error) {
+	kubeConfigPath := KubeconfigPath + tenantId + "/" + hostIp
+	kubeConfig, err := clientcmd.BuildConfigFromFlags("", kubeConfigPath)
+	if err != nil {
+		return "", err
+	}
+	clientset, err := kubernetes.NewForConfig(kubeConfig)
+	if err != nil {
+		return "", err
+	}
+
+	pods, err := s.getReleasePods(clientset, namespace, releaseName)
+	if err != nil {
+		return "", err
+	}
+	if len(pods.Items) == 0 {
+		return "", errors.New("pod not found for release")
+	}
+	log.Infof("[AppIP] candidate pods releaseName=%s namespace=%s count=%d", releaseName, namespace, len(pods.Items))
+	for _, pod := range pods.Items {
+		log.Infof("[AppIP] pod=%s podIP=%s labels=%s", pod.Name, pod.Status.PodIP, shortTextForLog(mapToCompactJSON(pod.Labels), 300))
+	}
+
+	targetNetwork := networkPlane
+
+	// Try to infer target network from pod annotation when request parameter is missing/default.
+	if targetNetwork == "" || targetNetwork == util.Default {
+		for _, pod := range pods.Items {
+			if networkAnnotation, found := pod.Annotations["k8s.v1.cni.cncf.io/networks"]; found {
+				log.Infof("[AppIP] pod=%s networks-annotation=%s", pod.Name, shortTextForLog(networkAnnotation, 300))
+				annotationNetwork := parseNetworkNameFromNetworksAnnotation(networkAnnotation)
+				if annotationNetwork != "" && annotationNetwork != util.Default {
+					targetNetwork = annotationNetwork
+					break
+				}
+			}
+		}
+	}
+	log.Infof("[AppIP] resolved targetNetwork=%s requestNetworkPlane=%s releaseName=%s", targetNetwork, networkPlane, releaseName)
+
+	hasSpecificTarget := targetNetwork != "" && targetNetwork != util.Default
+
+	// First pass: select IP by exact target network match.
+	for _, pod := range pods.Items {
+		networkStatus, ok := pod.Annotations["k8s.v1.cni.cncf.io/network-status"]
+		if ok && hasSpecificTarget {
+			log.Infof("[AppIP] specific-target pod=%s network-status=%s", pod.Name, shortTextForLog(networkStatus, 500))
+			ip := selectIPFromNetworkStatus(networkStatus, targetNetwork)
+			if ip != "" {
+				log.Infof("[AppIP] selected by specific-target pod=%s targetNetwork=%s ip=%s", pod.Name, targetNetwork, ip)
+				return ip, nil
+			}
+		}
+	}
+
+	// If a specific network is requested, do not fallback to default/PodIP.
+	// Keep polling until target network IP is present in network-status.
+	if hasSpecificTarget {
+		return "", errors.New("target network ip not ready")
+	}
+
+	// Second pass: fallback to default network in network-status.
+	// If request doesn't carry explicit network plane but pod has multus network entries,
+	// prefer non-default network IP first.
+	for _, pod := range pods.Items {
+		networkStatus, ok := pod.Annotations["k8s.v1.cni.cncf.io/network-status"]
+		if ok {
+			log.Infof("[AppIP] non-default fallback pod=%s network-status=%s", pod.Name, shortTextForLog(networkStatus, 500))
+			ip := selectPreferredNonDefaultIPFromNetworkStatus(networkStatus)
+			if ip != "" {
+				log.Infof("[AppIP] selected by non-default fallback pod=%s ip=%s", pod.Name, ip)
+				return ip, nil
+			}
+		}
+	}
+
+	// Third pass: fallback to default network in network-status.
+	for _, pod := range pods.Items {
+		networkStatus, ok := pod.Annotations["k8s.v1.cni.cncf.io/network-status"]
+		if ok {
+			ip := selectIPFromNetworkStatus(networkStatus, util.Default)
+			if ip != "" {
+				log.Infof("[AppIP] selected by default fallback pod=%s ip=%s", pod.Name, ip)
+				return ip, nil
+			}
+		}
+	}
+
+	// Fourth pass: fallback to PodIP.
+	for _, pod := range pods.Items {
+		if pod.Status.PodIP != "" {
+			log.Infof("[AppIP] selected by podIP fallback pod=%s ip=%s", pod.Name, pod.Status.PodIP)
+			return pod.Status.PodIP, nil
+		}
+	}
+
+	return "", errors.New("app ip not found")
+}
+
+func (s *ServerGRPC) getReleasePods(clientset *kubernetes.Clientset, namespace, releaseName string) (*v1.PodList, error) {
+	options := metav1.ListOptions{LabelSelector: "app.kubernetes.io/instance=" + releaseName}
+	pods, err := clientset.CoreV1().Pods(namespace).List(context.Background(), options)
+	if err != nil {
+		return nil, err
+	}
+	if len(pods.Items) > 0 {
+		return pods, nil
+	}
+
+	appName := extractAppNameFromRelease(releaseName)
+	if appName != "" {
+		options = metav1.ListOptions{LabelSelector: "app=" + appName}
+		pods, err = clientset.CoreV1().Pods(namespace).List(context.Background(), options)
+		if err != nil {
+			return nil, err
+		}
+		if len(pods.Items) > 0 {
+			return pods, nil
+		}
+	}
+
+	options = metav1.ListOptions{LabelSelector: "release=" + releaseName}
+	pods, err = clientset.CoreV1().Pods(namespace).List(context.Background(), options)
+	if err != nil {
+		return nil, err
+	}
+	if len(pods.Items) > 0 {
+		return pods, nil
+	}
+
+	allPods, err := clientset.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := &v1.PodList{}
+	for _, pod := range allPods.Items {
+		if strings.Contains(pod.Name, releaseName) {
+			filtered.Items = append(filtered.Items, pod)
+			continue
+		}
+		if appName != "" && strings.Contains(pod.Name, appName+"-") {
+			filtered.Items = append(filtered.Items, pod)
+		}
+	}
+	if len(filtered.Items) > 0 {
+		return filtered, nil
+	}
+
+	// Last fallback: return all pods in namespace and let IP selection logic decide safely.
+	return allPods, nil
+}
+
+func selectIPFromNetworkStatus(networkStatus, networkPlane string) string {
+	var entries []networkStatusEntry
+	if err := json.Unmarshal([]byte(networkStatus), &entries); err != nil {
+		return ""
+	}
+
+	if networkPlane != "" && networkPlane != util.Default {
+		target := normalizeNetworkName(networkPlane)
+		for _, item := range entries {
+			if len(item.IPs) == 0 {
+				continue
+			}
+			if normalizeNetworkName(item.Name) == target {
+				return item.IPs[0]
+			}
+		}
+		return ""
+	}
+
+	for _, item := range entries {
+		if len(item.IPs) == 0 {
+			continue
+		}
+		if item.Default {
+			return item.IPs[0]
+		}
+	}
+
+	for _, item := range entries {
+		if len(item.IPs) > 0 {
+			return item.IPs[0]
+		}
+	}
+
+	return ""
+}
+
+func selectPreferredNonDefaultIPFromNetworkStatus(networkStatus string) string {
+	var entries []networkStatusEntry
+	if err := json.Unmarshal([]byte(networkStatus), &entries); err != nil {
+		return ""
+	}
+
+	for _, item := range entries {
+		if len(item.IPs) == 0 {
+			continue
+		}
+		if item.Default {
+			continue
+		}
+		if normalizeNetworkName(item.Name) != "" {
+			return item.IPs[0]
+		}
+	}
+
+	return ""
+}
+
+func parseNetworkNameFromNetworksAnnotation(networksAnnotation string) string {
+	annotation := strings.TrimSpace(networksAnnotation)
+	if annotation == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(annotation, "[") {
+		var networkObjects []map[string]interface{}
+		if err := json.Unmarshal([]byte(annotation), &networkObjects); err == nil {
+			for _, item := range networkObjects {
+				if nameRaw, ok := item["name"]; ok {
+					if name, ok := nameRaw.(string); ok {
+						parsed := normalizeNetworkName(name)
+						if parsed != "" {
+							return parsed
+						}
+					}
+				}
+			}
+		}
+
+		var networkList []string
+		if err := json.Unmarshal([]byte(annotation), &networkList); err == nil {
+			for _, item := range networkList {
+				parsed := normalizeNetworkName(item)
+				if parsed != "" {
+					return parsed
+				}
+			}
+		}
+	}
+
+	first := strings.Split(annotation, ",")[0]
+	return normalizeNetworkName(first)
+}
+
+func normalizeNetworkName(networkName string) string {
+	name := strings.TrimSpace(networkName)
+	if name == "" {
+		return ""
+	}
+	if atIndex := strings.Index(name, "@"); atIndex > 0 {
+		name = name[:atIndex]
+	}
+	if slashIndex := strings.LastIndex(name, "/"); slashIndex >= 0 && slashIndex < len(name)-1 {
+		name = name[slashIndex+1:]
+	}
+	return strings.TrimSpace(name)
+}
+
+func extractAppNameFromRelease(releaseName string) string {
+	name := strings.TrimSpace(releaseName)
+	if name == "" {
+		return ""
+	}
+	re := regexp.MustCompile(`^(.*)-[0-9]{8}$`)
+	parts := re.FindStringSubmatch(name)
+	if len(parts) == 2 && parts[1] != "" {
+		return parts[1]
+	}
+	return name
+}
+
+func shortTextForLog(text string, limit int) string {
+	if limit <= 0 {
+		return text
+	}
+	if len(text) <= limit {
+		return text
+	}
+	return text[:limit] + "..."
+}
+
+func mapToCompactJSON(values map[string]string) string {
+	if len(values) == 0 {
+		return "{}"
+	}
+	bytes, err := json.Marshal(values)
+	if err != nil {
+		return "{marshal-error}"
+	}
+	return string(bytes)
 }
 
 // Upload file configuration
@@ -804,12 +1483,13 @@ func (s *ServerGRPC) getUploadConfigFile(stream internal_lcmservice.AppLCM_Uploa
 }
 
 // Insert or update application instance record
-func (s *ServerGRPC) insertOrUpdateAppInsRecord(appInsId, hostIp, releaseName, namespace string) (err error) {
+func (s *ServerGRPC) insertOrUpdateAppInsRecord(appInsId, hostIp, releaseName, namespace, appIp string) (err error) {
 	appInfoRecord := &models.AppInstanceInfo{
 		AppInsId:   appInsId,
 		HostIp:     hostIp,
 		WorkloadId: releaseName,
 		Namespace:  namespace,
+		AppIp:      appIp,
 	}
 	err = s.db.InsertOrUpdateData(appInfoRecord, util.AppInsId)
 	if err != nil && err.Error() != "LastInsertId is not supported by this driver" {

@@ -231,7 +231,7 @@ func TestAddValues(t *testing.T)  {
 		return
 	}
 	defer tarFile.Close()
-	appAuthCfg := config.NewBuildAppAuthConfig(appInstanceIdentifier, ak, sk)
+	appAuthCfg := config.NewBuildAppAuthConfig(appInstanceIdentifier, ak, sk, nil)
 	dirName, _, err := appAuthCfg.AddValues(tarFile)
 	if err != nil {
 		return
@@ -246,7 +246,7 @@ func TestAddValuesFailure(t *testing.T)  {
 	dir, _ := os.Getwd()
 	tarFile, err := os.Open(dir+"/"+"7e9b913f-748a-42b7-a088-abe3f750f04.tgz",)
 	defer tarFile.Close()
-	appAuthCfg := config.NewBuildAppAuthConfig(appInstanceIdentifier, ak, sk)
+	appAuthCfg := config.NewBuildAppAuthConfig(appInstanceIdentifier, ak, sk, nil)
 	dirName, _, err := appAuthCfg.AddValues(tarFile)
 	if err != nil {
 		return

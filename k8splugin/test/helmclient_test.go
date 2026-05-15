@@ -121,7 +121,8 @@ func testDeploySuccess(t *testing.T) {
 		HostIp:    hostIpAddress,
 		PackageId: packageId,
 	}
-	result, _, _ := client.Deploy(appPkgRecord, appInstanceIdentifier, ak, sk,
+	// [修改] 2026-01-19 网络平面功能：添加 parameters 参数（测试用例传 nil）
+	result, _, _ := client.Deploy(appPkgRecord, appInstanceIdentifier, ak, sk, nil,
 		&mockK8sPluginDb{appInstanceRecords: make(map[string]models.AppInstanceInfo)})
 	assert.Equal(t, "", result, "TestGetReleaseNamespaceSuccess execution result")
 }
@@ -167,7 +168,8 @@ func testDeployFailure(t *testing.T) {
 		HostIp:    hostIpAddress,
 		PackageId: packageId,
 	}
-	result, _, _ := client.Deploy(appPkgRec, appInstanceIdentifier, ak, sk,
+	// [修改] 2026-01-19 网络平面功能：添加 parameters 参数（测试用例传 nil）
+	result, _, _ := client.Deploy(appPkgRec, appInstanceIdentifier, ak, sk, nil,
 		&mockK8sPluginDb{appInstanceRecords: make(map[string]models.AppInstanceInfo)})
 	assert.Equal(t, "", result, "TestGetReleaseNamespaceSuccess execution result")
 }

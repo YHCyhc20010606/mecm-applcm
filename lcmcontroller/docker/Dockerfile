@@ -16,8 +16,10 @@ FROM swr.cn-north-4.myhuaweicloud.com/eg-common/golang:1.14.2-alpine3.11 as buil
 
 ENV HOME=/usr/app
 
-RUN apk update &&\
-    apk add --no-cache gcc libc-dev  shadow
+RUN echo "https://repo.huaweicloud.com/alpine/v3.11/main" > /etc/apk/repositories &&\
+    echo "https://repo.huaweicloud.com/alpine/v3.11/community" >> /etc/apk/repositories &&\
+    apk update &&\
+    apk add --no-cache gcc libc-dev shadow
 
 RUN mkdir -p $HOME
 
@@ -53,7 +55,10 @@ ENV GROUP_NAME=eggroup
 ENV ENV="/etc/profile"
 
 # Create an app user so our program doesn't run as root.
-RUN apk update &&\
+RUN VER=$(cut -d'.' -f1-2 /etc/alpine-release) &&\
+    echo "https://repo.huaweicloud.com/alpine/v${VER}/main" > /etc/apk/repositories &&\
+    echo "https://repo.huaweicloud.com/alpine/v${VER}/community" >> /etc/apk/repositories &&\
+    apk update &&\
     apk add shadow &&\
     groupadd -r -g $GID $GROUP_NAME &&\
     useradd -r -u $UID -g $GID -d $HOME -s /sbin/nologin -c "Docker image user" $USER_NAME &&\

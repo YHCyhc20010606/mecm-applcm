@@ -106,7 +106,9 @@ func NewHelmClient(tenantId string, hostIP string) (*HelmClient, error) {
 }
 
 // Install a given helm chart
-func (hc *HelmClient) Deploy(appPkgRecord *models.AppPackage, appInsId, ak, sk string, db pgdb.Database) (string, string, error) {
+// [修改] 2026-01-19 网络平面功能：添加 parameters 参数用于接收前端配置
+// 原始签名: func (hc *HelmClient) Deploy(appPkgRecord *models.AppPackage, appInsId, ak, sk string, db pgdb.Database)
+func (hc *HelmClient) Deploy(appPkgRecord *models.AppPackage, appInsId, ak, sk string, parameters map[string]string, db pgdb.Database) (string, string, error) {
 	log.Info("Inside helm client")
 
 	helmChart, err := hc.getHelmChart(appPkgRecord.TenantId, appPkgRecord.HostIp, appPkgRecord.PackageId)
@@ -117,7 +119,10 @@ func (hc *HelmClient) Deploy(appPkgRecord *models.AppPackage, appInsId, ak, sk s
 	}
 	defer tarFile.Close()
 
-	appAuthCfg := config.NewBuildAppAuthConfig(appInsId, ak, sk)
+	// [修改] 2026-01-19 网络平面功能：将 parameters 传递给配置构建器
+	// 原始调用: config.NewBuildAppAuthConfig(appInsId, ak, sk)
+	// 新增参数: parameters - 包含 networkPlane 等前端传递的部署配置
+	appAuthCfg := config.NewBuildAppAuthConfig(appInsId, ak, sk, parameters)
 	dirName, namespace, err := appAuthCfg.AddValues(tarFile)
 	if err != nil {
 		log.Error("Failed to add values in values file")

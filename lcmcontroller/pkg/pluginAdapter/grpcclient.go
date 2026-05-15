@@ -90,6 +90,11 @@ func NewClientGRPC(cfg ClientGRPCConfig) (c *ClientGRPC, err error) {
 // Instantiate application
 func (c *ClientGRPC) Instantiate(ctx context.Context, tenantId string, accessToken string,
 	appInsId string, instantiateReq models.InstantiateRequest) (status string, error error) {
+	// [NetworkPlane DEBUG] 节点3: gRPC client 打包请求，打印即将发送的参数
+	log.Infof("[NetworkPlane] [3/5] grpcclient Instantiate, appInsId=%s, parameters count=%d", appInsId, len(instantiateReq.Parameters))
+	for k, v := range instantiateReq.Parameters {
+		log.Infof("[NetworkPlane] [3/5]   param key=%s  value=%s", k, v)
+	}
 	req := &internal_lcmservice.InstantiateRequest{
 		HostIp:        instantiateReq.HostIp,
 		TenantId:      tenantId,

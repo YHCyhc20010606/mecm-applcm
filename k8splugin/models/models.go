@@ -32,6 +32,7 @@ type AppInstanceInfo struct {
 	HostIp     string
 	WorkloadId string
 	Namespace  string
+	AppIp      string
 }
 
 // AppPackage info record

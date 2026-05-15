@@ -682,6 +682,14 @@ func (c *LcmControllerV2) InstantiateV2() {
 	if req.Parameters == nil {
 		req.Parameters = make(map[string]string)
 	}
+	// [NetworkPlane DEBUG] 节点1: lcmcontroller 收到实例化请求，打印全部参数
+	log.Infof("[NetworkPlane] [1/5] lcmcontroller InstantiateV2 received parameters count=%d", len(req.Parameters))
+	for k, v := range req.Parameters {
+		log.Infof("[NetworkPlane] [1/5]   param key=%s  value=%s", k, v)
+	}
+	if _, ok := req.Parameters["networkPlane"]; !ok {
+		log.Warn("[NetworkPlane] [1/5]   WARNING: key 'networkPlane' NOT found in parameters")
+	}
 	bKey := *(*[]byte)(unsafe.Pointer(&accessToken))
 	appInsId, _, hostIp, packageId, appName, err := c.ValidateToken(accessToken, req, clientIp)
 	if err != nil {
@@ -805,6 +813,11 @@ func DoInstantiate(c *LcmControllerV2, params *models.AppInfoParams, bKey []byte
 		return
 	}
 
+	// [NetworkPlane DEBUG] 节点2: 即将调用 pluginAdapter.Instantiate，打印透传的参数
+	log.Infof("[NetworkPlane] [2/5] DoInstantiate -> adapter.Instantiate, parameters count=%d", len(req.Parameters))
+	for k, v := range req.Parameters {
+		log.Infof("[NetworkPlane] [2/5]   param key=%s  value=%s", k, v)
+	}
 	adapter := pluginAdapter.NewPluginAdapter(pluginInfo, client)
 	err, status := adapter.Instantiate(params.ConfitTenantId, params.AccessToken, params.AppInstanceId, req)
 	util.ClearByteArray(bKey)

@@ -17,7 +17,10 @@ FROM swr.cn-north-4.myhuaweicloud.com/eg-common/golang:1.14.2-alpine3.11 as buil
 ENV GOPROXY https://goproxy.cn,direct
 ENV HOME=/usr/app
 
-RUN apk update &&\
+# RUN apk update &&\
+#     apk add --no-cache gcc libc-dev shadow
+RUN sed -i 's|https\?://repo.huaweicloud.com/alpine|https://mirrors.aliyun.com/alpine|g' /etc/apk/repositories &&\
+    apk update &&\
     apk add --no-cache gcc libc-dev shadow
 
 RUN mkdir -p $HOME
@@ -53,8 +56,13 @@ ENV GROUP_NAME=eggroup
 ENV ENV="/etc/profile"
 
 # Create an app user so our program doesn't run as root.
-RUN apk update &&\
-    apk add shadow &&\
+# RUN apk update &&\
+#     apk add shadow &&\
+#     groupadd -r -g $GID $GROUP_NAME &&\
+#     useradd -r -u $UID -g $GID -d $HOME -s /sbin/nologin -c "Docker image user" $USER_NAME
+RUN sed -i 's|https\?://repo.huaweicloud.com/alpine|https://mirrors.aliyun.com/alpine/|g' /etc/apk/repositories &&\
+    apk update &&\
+    apk add --no-cache shadow &&\
     groupadd -r -g $GID $GROUP_NAME &&\
     useradd -r -u $UID -g $GID -d $HOME -s /sbin/nologin -c "Docker image user" $USER_NAME
 
