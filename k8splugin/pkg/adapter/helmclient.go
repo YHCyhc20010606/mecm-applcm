@@ -347,6 +347,20 @@ func (hc *HelmClient) QueryKPI() (string, error) {
 
 	metricInfo.CpuUsage["used"] = totalPodCpu
 	metricInfo.MemUsage["used"] = totalPodMem
+
+	// Disk usage via kubelet stats summary
+	metricInfo.DiskUsage = make(map[string]int64)
+	// getNodeDiskInfo will aggregate node fs stats from /proxy/stats/summary
+	totalDisk, availableDisk, usedDisk, diskErr := getNodeDiskInfo(clientset)
+	if diskErr != nil {
+		log.Warn("failed to get disk info: ", diskErr)
+		totalDisk = 0
+		availableDisk = 0
+		usedDisk = 0
+	}
+	metricInfo.DiskUsage["total"] = totalDisk
+	metricInfo.DiskUsage["available"] = availableDisk
+	metricInfo.DiskUsage["used"] = usedDisk	
 	result := &models.ReturnResponse{
 		Data:    metricInfo,
 		RetCode: 0,
@@ -868,6 +882,59 @@ func GetTotalCpuDiskMemory(clientset *kubernetes.Clientset) (string, string, str
 func GetNodeList(clientset *kubernetes.Clientset) (nodeList *v1.NodeList, err error) {
 	nodeList, err = clientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 	return nodeList, err
+}
+
+
+// getNodeDiskInfo aggregates disk stats from kubelet stats summary for all nodes
+func getNodeDiskInfo(clientset *kubernetes.Clientset) (totalDisk, availableDisk, usedDisk int64, err error) {
+	nodeList, err := clientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		log.Error("failed to get nodes list: ", err)
+		return 0, 0, 0, err
+	}
+
+	// Minimal struct to unmarshal required fields from stats/summary
+	type fsStats struct {
+		Time           string `json:"time"`
+		AvailableBytes int64  `json:"availableBytes"`
+		CapacityBytes  int64  `json:"capacityBytes"`
+		UsedBytes      int64  `json:"usedBytes"`
+	}
+	type nodeSummary struct {
+		Node struct {
+			FS fsStats `json:"fs"`
+		} `json:"node"`
+	}
+
+	for _, node := range nodeList.Items {
+		nodeName := node.Name
+		path := fmt.Sprintf("/api/v1/nodes/%s/proxy/stats/summary", nodeName)
+		data, err := clientset.RESTClient().Get().AbsPath(path).DoRaw(context.Background())
+		if err != nil {
+			log.Warnf("failed to get stats for node %s: %v", nodeName, err)
+			continue
+		}
+
+		var summary nodeSummary
+		if err := json.Unmarshal(data, &summary); err != nil {
+			log.Warnf("failed to unmarshal stats for node %s: %v", nodeName, err)
+			continue
+		}
+
+		fs := summary.Node.FS
+		totalDisk += fs.CapacityBytes
+		availableDisk += fs.AvailableBytes
+		usedDisk += fs.UsedBytes
+
+		log.WithFields(log.Fields{
+			"node":      nodeName,
+			"total":     fs.CapacityBytes,
+			"available": fs.AvailableBytes,
+			"used":      fs.UsedBytes,
+		}).Info("Retrieved disk stats from node")
+	}
+
+	return totalDisk, availableDisk, usedDisk, nil
 }
 
 // Split manifest yaml file

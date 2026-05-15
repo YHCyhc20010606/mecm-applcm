@@ -131,6 +131,7 @@ type SwImageDescriptor struct {
 type MetricInfo struct {
 	CpuUsage map[string]int64 `json:"cpuusage"`
 	MemUsage map[string]int64 `json:"memusage"`
+	DiskUsage map[string]int64 `json:"diskusage"`
 }
 
 // Return response
