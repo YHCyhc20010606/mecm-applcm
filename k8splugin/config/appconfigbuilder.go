@@ -354,6 +354,9 @@ func buildMultusAnnotation(networkPlane string) string {
 	}
 }
 
+const maxCPURequest = 100.0
+const maxMemoryRequestGi = 128
+
 func injectResourceRequests(values map[string]interface{}, parameters map[string]string) {
 	if parameters == nil {
 		log.Info("[ResourceRequest] SKIP: parameters is nil")
@@ -371,8 +374,13 @@ func injectResourceRequests(values map[string]interface{}, parameters map[string
 			cpuRequest, parameters["memoryRequest"])
 		return
 	}
-	if !isPositiveCPURequest(cpuRequest) {
-		log.Warnf("[ResourceRequest] SKIP: invalid cpuRequest='%s'", cpuRequest)
+	if !isValidCPURequestWithinMax(cpuRequest) {
+		log.Warnf("[ResourceRequest] SKIP: invalid or out-of-range cpuRequest='%s' (max %.0f)", cpuRequest, maxCPURequest)
+		return
+	}
+	if !isNormalizedMemoryWithinMaxGi(memoryRequest) {
+		log.Warnf("[ResourceRequest] SKIP: memory out of range (max %dGi or %dMi): '%s'",
+			maxMemoryRequestGi, maxMemoryRequestGi*1024, memoryRequest)
 		return
 	}
 
@@ -393,11 +401,11 @@ func injectResourceRequestsIntoTemplates(chartDir string, parameters map[string]
 	if cpuRequest == "" || memoryRequest == "" {
 		return errors.New("cpuRequest/memoryRequest empty")
 	}
-	if !isPositiveCPURequest(cpuRequest) {
-		return errors.New("cpuRequest invalid")
+	if !isValidCPURequestWithinMax(cpuRequest) {
+		return errors.New("cpuRequest invalid or out of range")
 	}
-	if memoryRequest == "" {
-		return errors.New("memoryRequest invalid")
+	if memoryRequest == "" || !isNormalizedMemoryWithinMaxGi(memoryRequest) {
+		return errors.New("memoryRequest invalid or out of range")
 	}
 
 	templatesDir := filepath.Join(chartDir, "templates")
@@ -461,9 +469,22 @@ func getOrCreateMap(parent map[string]interface{}, key string) map[string]interf
 	return next
 }
 
-func isPositiveCPURequest(cpuRequest string) bool {
+func isValidCPURequestWithinMax(cpuRequest string) bool {
 	value, err := strconv.ParseFloat(cpuRequest, 64)
-	return err == nil && value > 0
+	return err == nil && value > 0 && value <= maxCPURequest
+}
+
+// isNormalizedMemoryWithinMaxGi checks normalized strings like "2Gi" or "2048Mi" against maxMemoryRequestGi.
+func isNormalizedMemoryWithinMaxGi(norm string) bool {
+	if strings.HasSuffix(norm, "Gi") {
+		n, err := strconv.Atoi(strings.TrimSuffix(norm, "Gi"))
+		return err == nil && n > 0 && n <= maxMemoryRequestGi
+	}
+	if strings.HasSuffix(norm, "Mi") {
+		mi, err := strconv.Atoi(strings.TrimSuffix(norm, "Mi"))
+		return err == nil && mi > 0 && mi <= maxMemoryRequestGi*1024
+	}
+	return false
 }
 
 func normalizeMemoryRequest(memoryRequest string) string {

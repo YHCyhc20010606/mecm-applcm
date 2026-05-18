@@ -92,6 +92,46 @@ func TestInjectResourceRequestsSkipsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestInjectResourceRequestsMaxBoundary(t *testing.T) {
+	values := map[string]interface{}{}
+	parameters := map[string]string{
+		"cpuRequest":    "100",
+		"memoryRequest": "128Gi",
+	}
+	injectResourceRequests(values, parameters)
+	resources := values["resources"].(map[string]interface{})
+	requests := resources["requests"].(map[string]interface{})
+	if requests["cpu"] != "100" || requests["memory"] != "128Gi" {
+		t.Fatalf("unexpected requests: %v", requests)
+	}
+
+	values2 := map[string]interface{}{}
+	parameters2 := map[string]string{
+		"cpuRequest":    "1",
+		"memoryRequest": "131072",
+	}
+	injectResourceRequests(values2, parameters2)
+	r2 := values2["resources"].(map[string]interface{})["requests"].(map[string]interface{})
+	if r2["memory"] != "131072Mi" {
+		t.Fatalf("expected 131072Mi, got %v", r2["memory"])
+	}
+}
+
+func TestInjectResourceRequestsSkipsOverMax(t *testing.T) {
+	tests := []map[string]string{
+		{"cpuRequest": "100.1", "memoryRequest": "2Gi"},
+		{"cpuRequest": "2", "memoryRequest": "129Gi"},
+		{"cpuRequest": "2", "memoryRequest": "131073"},
+	}
+	for _, p := range tests {
+		values := map[string]interface{}{}
+		injectResourceRequests(values, p)
+		if _, ok := values["resources"]; ok {
+			t.Fatalf("expected skip for params %+v", p)
+		}
+	}
+}
+
 func TestInjectResourceRequestsIntoTemplatesPreservesIndent(t *testing.T) {
 	dir := t.TempDir()
 	templatesDir := filepath.Join(dir, "templates")

@@ -494,11 +494,40 @@ func (s *ServerGRPC) getAppPortsJson(tenantId, hostIp, namespace, releaseName st
 		return "", err
 	}
 
-	services, err := clientset.CoreV1().Services(namespace).List(context.Background(), metav1.ListOptions{})
+	services, err := s.getReleaseServices(clientset, namespace, releaseName)
 	if err != nil {
 		return "", err
 	}
-	return BuildAppPortsJson(pods, services)
+	portsJson, buildErr := BuildAppPortsJson(pods, services)
+	if buildErr == nil {
+		log.Infof("[AppPorts] collected releaseName=%s namespace=%s containerPorts=%d servicePorts=%d jsonBytes=%d",
+			releaseName, namespace, countContainerPorts(pods), countServicePorts(services), len(portsJson))
+	}
+	return portsJson, buildErr
+}
+
+func countContainerPorts(pods *v1.PodList) int {
+	count := 0
+	if pods == nil {
+		return 0
+	}
+	for _, pod := range pods.Items {
+		for _, c := range pod.Spec.Containers {
+			count += len(c.Ports)
+		}
+	}
+	return count
+}
+
+func countServicePorts(services *v1.ServiceList) int {
+	count := 0
+	if services == nil {
+		return 0
+	}
+	for _, svc := range services.Items {
+		count += len(svc.Spec.Ports)
+	}
+	return count
 }
 
 func BuildAppPortsJson(pods *v1.PodList, services *v1.ServiceList) (string, error) {
@@ -933,6 +962,55 @@ func (s *ServerGRPC) getReleasePods(clientset *kubernetes.Clientset, namespace, 
 
 	// Last fallback: return all pods in namespace and let IP selection logic decide safely.
 	return allPods, nil
+}
+
+func (s *ServerGRPC) getReleaseServices(clientset *kubernetes.Clientset, namespace, releaseName string) (*v1.ServiceList, error) {
+	options := metav1.ListOptions{LabelSelector: "app.kubernetes.io/instance=" + releaseName}
+	services, err := clientset.CoreV1().Services(namespace).List(context.Background(), options)
+	if err != nil {
+		return nil, err
+	}
+	if len(services.Items) > 0 {
+		return services, nil
+	}
+
+	appName := extractAppNameFromRelease(releaseName)
+	if appName != "" {
+		options = metav1.ListOptions{LabelSelector: "app=" + appName}
+		services, err = clientset.CoreV1().Services(namespace).List(context.Background(), options)
+		if err != nil {
+			return nil, err
+		}
+		if len(services.Items) > 0 {
+			return services, nil
+		}
+	}
+
+	options = metav1.ListOptions{LabelSelector: "release=" + releaseName}
+	services, err = clientset.CoreV1().Services(namespace).List(context.Background(), options)
+	if err != nil {
+		return nil, err
+	}
+	if len(services.Items) > 0 {
+		return services, nil
+	}
+
+	allServices, err := clientset.CoreV1().Services(namespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := &v1.ServiceList{}
+	for _, svc := range allServices.Items {
+		if strings.Contains(svc.Name, releaseName) {
+			filtered.Items = append(filtered.Items, svc)
+			continue
+		}
+		if appName != "" && strings.Contains(svc.Name, appName+"-") {
+			filtered.Items = append(filtered.Items, svc)
+		}
+	}
+	return filtered, nil
 }
 
 func selectIPFromNetworkStatus(networkStatus, networkPlane string) string {
