@@ -24,6 +24,7 @@ import (
 	"github.com/ghodss/yaml"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/rest"
 	"k8s.io/metrics/pkg/apis/metrics/v1beta1"
@@ -312,8 +313,8 @@ func (hc *HelmClient) QueryKPI() (string, error) {
 	var metricInfo models.MetricInfo
 	var totalCpu int64
 	var totalMem int64
-	var totalPodCpu int64
-	var totalPodMem int64
+	var usedCpu int64
+	var usedMem int64
 
 	// uses the current context in kubeconfig
 	kubeConfig, err := clientcmd.BuildConfigFromFlags("", hc.Kubeconfig)
@@ -326,18 +327,22 @@ func (hc *HelmClient) QueryKPI() (string, error) {
 		return "", err
 	}
 
+	totalCpu, totalMem, err = getNodeAllocatableCpuMem(clientset)
+	if err != nil {
+		log.Warn("failed to get node allocatable cpu and memory info: ", err)
+		totalCpu = 0
+		totalMem = 0
+	}
+
 	var statsInfo map[string]interface{}
 	data, err := clientset.RESTClient().Get().AbsPath("apis/metrics.k8s.io/v1beta1/nodes").DoRaw(context.Background())
-
-	_ = json.Unmarshal(data, &statsInfo)
-
-	totalCpu, totalMem = getNodeTotalCpuMem(statsInfo)
-
-	var statsInfo1 map[string]interface{}
-	data1, err := clientset.RESTClient().Get().AbsPath("apis/metrics.k8s.io/v1beta1/pods").DoRaw(context.Background())
-	_ = json.Unmarshal(data1, &statsInfo1)
-
-	totalPodCpu, totalPodMem = getPodTotalCpuMem(statsInfo1)
+	if err != nil {
+		log.Warn("failed to get node metrics info: ", err)
+	} else if err = json.Unmarshal(data, &statsInfo); err != nil {
+		log.Warn("failed to unmarshal node metrics info: ", err)
+	} else {
+		usedCpu, usedMem = getNodeTotalCpuMem(statsInfo)
+	}
 
 	metricInfo.CpuUsage = make(map[string]int64)
 	metricInfo.MemUsage = make(map[string]int64)
@@ -345,8 +350,8 @@ func (hc *HelmClient) QueryKPI() (string, error) {
 	metricInfo.CpuUsage["total"] = totalCpu
 	metricInfo.MemUsage["total"] = totalMem
 
-	metricInfo.CpuUsage["used"] = totalPodCpu
-	metricInfo.MemUsage["used"] = totalPodMem
+	metricInfo.CpuUsage["used"] = usedCpu
+	metricInfo.MemUsage["used"] = usedMem
 
 	// Disk usage via kubelet stats summary
 	metricInfo.DiskUsage = make(map[string]int64)
@@ -360,7 +365,7 @@ func (hc *HelmClient) QueryKPI() (string, error) {
 	}
 	metricInfo.DiskUsage["total"] = totalDisk
 	metricInfo.DiskUsage["available"] = availableDisk
-	metricInfo.DiskUsage["used"] = usedDisk	
+	metricInfo.DiskUsage["used"] = usedDisk
 	result := &models.ReturnResponse{
 		Data:    metricInfo,
 		RetCode: 0,
@@ -419,24 +424,33 @@ func processUsage(iter1 *reflect.MapIter, totalPodCpu, totalPodMem int64) (int64
 		iter2 := reflect.ValueOf(val).MapRange()
 		for iter2.Next() {
 			if iter2.Key().Interface() == "cpu" {
-				cpuVal := iter2.Value().Interface()
-				cpu := cpuVal.(string)
-				cpuLen := len(cpu)
-				cpu = cpu[:cpuLen-1]
-				cpuInfo, _ := strconv.ParseInt(cpu, 10, 64);
+				cpuInfo := parseCpuQuantity(iter2.Value().Interface())
 				totalPodCpu = totalPodCpu + cpuInfo
 			}
 			if iter2.Key().Interface() == "memory" {
-				memory := iter2.Value().Interface()
-				mem := memory.(string)
-				memLen := len(mem)
-				mem = mem[:memLen-2]
-				memInfo, _ := strconv.ParseInt(mem, 10, 64);
+				memInfo := parseMemoryQuantity(iter2.Value().Interface())
 				totalPodMem = totalPodMem + memInfo
 			}
 		}
 	}
 	return totalPodCpu, totalPodMem
+}
+
+func getNodeAllocatableCpuMem(clientset *kubernetes.Clientset) (totalCpu, totalMem int64, err error) {
+	nodeList, err := GetNodeList(clientset)
+	if err != nil {
+		return 0, 0, err
+	}
+	totalCpu, totalMem = getNodeAllocatableCpuMemFromList(nodeList)
+	return totalCpu, totalMem, nil
+}
+
+func getNodeAllocatableCpuMemFromList(nodeList *v1.NodeList) (totalCpu, totalMem int64) {
+	for _, node := range nodeList.Items {
+		totalCpu = totalCpu + node.Status.Allocatable.Cpu().ScaledValue(resource.Nano)
+		totalMem = totalMem + node.Status.Allocatable.Memory().Value()
+	}
+	return totalCpu, totalMem
 }
 
 func getNodeTotalCpuMem(statsInfo map[string]interface{}) (totalCpu, totalMem int64) {
@@ -461,25 +475,47 @@ func getCpuMemUsageInfo(usage interface{}, totalCpu, totalMem int64) (int64, int
 			iter1 := reflect.ValueOf(val).MapRange()
 			for iter1.Next() {
 				if iter1.Key().Interface() == "cpu" {
-					cpuVal := iter1.Value().Interface()
-					cpu := cpuVal.(string)
-					cpuLen := len(cpu)
-					cpu = cpu[:cpuLen-1]
-					cpuInfo, _ := strconv.ParseInt(cpu, 10, 64);
+					cpuInfo := parseCpuQuantity(iter1.Value().Interface())
 					totalCpu = totalCpu + cpuInfo
 				}
 				if iter1.Key().Interface() == "memory" {
-					memory := iter1.Value().Interface()
-					mem := memory.(string)
-					memLen := len(mem)
-					mem = mem[:memLen-2]
-					memInfo, _ := strconv.ParseInt(mem, 10, 64);
+					memInfo := parseMemoryQuantity(iter1.Value().Interface())
 					totalMem = totalMem + memInfo
 				}
 			}
 		}
 	}
 	return totalCpu, totalMem
+}
+
+func parseCpuQuantity(value interface{}) int64 {
+	quantity, err := parseResourceQuantity(value)
+	if err != nil {
+		log.Warn("failed to parse cpu quantity: ", err)
+		return 0
+	}
+	return quantity.ScaledValue(resource.Nano)
+}
+
+func parseMemoryQuantity(value interface{}) int64 {
+	quantity, err := parseResourceQuantity(value)
+	if err != nil {
+		log.Warn("failed to parse memory quantity: ", err)
+		return 0
+	}
+	return quantity.Value()
+}
+
+func parseResourceQuantity(value interface{}) (*resource.Quantity, error) {
+	quantityStr, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("quantity value is not string: %v", value)
+	}
+	quantity, err := resource.ParseQuantity(quantityStr)
+	if err != nil {
+		return nil, err
+	}
+	return &quantity, nil
 }
 
 // Get workload description
@@ -883,7 +919,6 @@ func GetNodeList(clientset *kubernetes.Clientset) (nodeList *v1.NodeList, err er
 	nodeList, err = clientset.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 	return nodeList, err
 }
-
 
 // getNodeDiskInfo aggregates disk stats from kubelet stats summary for all nodes
 func getNodeDiskInfo(clientset *kubernetes.Clientset) (totalDisk, availableDisk, usedDisk int64, err error) {

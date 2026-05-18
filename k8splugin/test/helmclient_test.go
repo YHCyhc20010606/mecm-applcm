@@ -356,7 +356,7 @@ func testQueryKpi(t *testing.T) {
 	defer patch6.Reset()
 
 	result, _ := client.QueryKPI()
-	assert.Equal(t, "{\"data\":{\"cpuusage\":{\"total\":0,\"used\":0},\"memusage\":{\"total\":0,\"used\":0}},\"retCode\":0,\"message\":\"success\",\"params\":null}", result, "Test query kpi execution result")
+	assert.Equal(t, "{\"data\":{\"cpuusage\":{\"total\":0,\"used\":0},\"memusage\":{\"total\":0,\"used\":0},\"diskusage\":{\"available\":0,\"total\":0,\"used\":0}},\"retCode\":0,\"message\":\"success\",\"params\":null}", result, "Test query kpi execution result")
 }
 
 func TestGetLabelSelector(t *testing.T) {
